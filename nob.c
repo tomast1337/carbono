@@ -35,9 +35,11 @@ int main(int argc, char **argv) {
 
     // Source Files
     nob_cmd_append(&cmd, "src/main.c");
-    nob_cmd_append(&cmd, "deps/sds.c");        // Compile string lib
-    nob_cmd_append(&cmd, "build/parser.tab.c"); // Compile generated parser
-    nob_cmd_append(&cmd, "build/lex.yy.c");     // Compile generated lexer
+    nob_cmd_append(&cmd, "src/ast.c");          // <--- ADDED THIS
+    nob_cmd_append(&cmd, "src/impl.c");         // <--- ADDED THIS (Fixes linker error)
+    nob_cmd_append(&cmd, "deps/sds.c");
+    nob_cmd_append(&cmd, "build/parser.tab.c");
+    nob_cmd_append(&cmd, "build/lex.yy.c");
 
     if (!nob_cmd_run_sync(cmd)) return 1;
 

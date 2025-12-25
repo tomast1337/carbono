@@ -1,0 +1,9 @@
+programa "TesteCarbono" {
+    var x: inteiro = 10
+    var msg: texto = "Ola Carbono!"
+    
+    se (x > 5) {
+        // This is a function call stub
+        escreval(msg)
+    }
+}
