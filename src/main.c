@@ -1,33 +1,13 @@
 #include <stdio.h>
+#include <stdlib.h> // for system()
 #include "ast.h"
-#include "sds.h"
 
-// Lexer/Parser Interface
 extern int yyparse();
 extern FILE* yyin;
 extern ASTNode* root_node;
 
-// Helper to visualize the tree (Debug)
-void print_ast(ASTNode* node, int level) {
-    if (!node) return;
-    for(int i=0; i<level; i++) printf("  ");
-
-    switch(node->type) {
-        case NODE_PROGRAM: printf("PROGRAM: %s\n", node->name); break;
-        case NODE_BLOCK:   printf("BLOCK\n"); break;
-        case NODE_VAR_DECL: 
-            printf("VAR %s (Type: %s)\n", node->name, node->data_type); 
-            break;
-        case NODE_LITERAL_INT: printf("INT: %d\n", node->int_value); break;
-        case NODE_LITERAL_STRING: printf("STRING: '%s'\n", node->string_value); break;
-        default: printf("NODE (%d)\n", node->type);
-    }
-
-    // Iterate children using stb_ds
-    for (int i=0; i < arrlen(node->children); i++) {
-        print_ast(node->children[i], level + 1);
-    }
-}
+// Declaration from codegen.c
+void codegen(ASTNode* node, FILE* file);
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -41,15 +21,26 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 1. Parse
     yyparse();
 
-    // 2. Debug Print
     if (root_node) {
-        printf("--- AST Generated ---\n");
-        print_ast(root_node, 0);
-    } else {
-        printf("Parsing failed.\n");
+        // 1. Open Output File
+        FILE* out = fopen("output.c", "w");
+        if (!out) {
+            printf("Error: Could not create output.c\n");
+            return 1;
+        }
+
+        // 2. Generate C Code
+        printf("[Carbono] Transpiling to C...\n");
+        codegen(root_node, out);
+        fclose(out);
+
+        // 3. Compile with GCC
+        printf("[Carbono] Compiling Native Binary...\n");
+        system("gcc output.c -o program");
+        
+        printf("[Carbono] Done! Run with ./program\n");
     }
 
     return 0;
