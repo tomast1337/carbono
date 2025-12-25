@@ -1,0 +1,26 @@
+# --- Build System & Output ---
+# The build directory (contains generated parser/lexer C files & compiled binary)
+build/
+
+# The bootstrap builder executable
+nob
+nob.exe
+
+# --- Temporary Object Files (Safety Net) ---
+# In case you manually compile something outside the build dir
+*.o
+*.obj
+*.a
+*.lib
+
+# --- Debugging Artifacts ---
+*.dSYM/
+*.pdb
+
+# --- Editor & OS Junk ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
