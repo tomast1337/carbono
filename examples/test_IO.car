@@ -1,0 +1,28 @@
+programa "EntradaSaida" {
+    // 1. Declaration with Input
+    escreval("Qual seu nome?");
+    var nome: texto = ler(); // Compiler sees 'texto', uses read_string()
+
+    // 2. Declaration with Number
+    escreval("Qual sua idade?");
+    var idade: inteiro32 = ler(); // Compiler sees 'inteiro', uses read_int()
+
+    // 3. Re-assignment (Requires Symbol Table!)
+    escreval("Ops, digite novamente sua idade:");
+    idade = ler(); // Compiler looks up 'idade', finds 'inteiro', uses read_int()
+
+    // 4. Boolean Logic (Manual Parsing)
+    escreval("Voce e programador? (s/n)");
+    var resp: texto = ler();
+    
+    var is_dev: booleano = 0; // 0 = false
+    se (resp == "s") {
+        is_dev = 1; // 1 = true
+    }
+    
+    escreval("Ola ${nome}, com ${idade} ano(s)");
+    
+    // 5. System Pause
+    escreval("Fim. Pressione Enter.");
+    ler(); // Compiler sees no assignment, uses wait_enter()
+}
