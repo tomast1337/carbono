@@ -141,6 +141,14 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "%d", node->int_value);
         break;
 
+    case NODE_LITERAL_DOUBLE:
+        fprintf(file, "%f", node->double_value);
+        break;
+
+    case NODE_LITERAL_FLOAT:
+        fprintf(file, "%f", node->float_value);
+        break;
+
     case NODE_LITERAL_STRING:
         fprintf(file, "\"%s\"", node->string_value);
         break;

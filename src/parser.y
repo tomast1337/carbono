@@ -11,12 +11,16 @@ ASTNode* root_node = NULL;
 
 %union {
     int integer;
+    double double_val;
+    float float_val;
     char* str;
     struct ASTNode* node;
 }
 
 %token <str> TOKEN_ID TOKEN_LIT_STRING
 %token <integer> TOKEN_LIT_INT
+%token <double_val> TOKEN_LIT_DOUBLE
+%token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_EXTERNO TOKEN_FUNCAO
 
 /* Types for non-terminals */
@@ -80,6 +84,14 @@ expr:
     TOKEN_LIT_INT {
         $$ = ast_new(NODE_LITERAL_INT);
         $$->int_value = $1;
+    }
+    | TOKEN_LIT_DOUBLE {
+        $$ = ast_new(NODE_LITERAL_DOUBLE);
+        $$->double_value = $1;
+    }
+    | TOKEN_LIT_FLOAT {
+        $$ = ast_new(NODE_LITERAL_FLOAT);
+        $$->float_value = $1;
     }
     | TOKEN_LIT_STRING {
         $$ = ast_new(NODE_LITERAL_STRING);

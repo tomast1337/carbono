@@ -5,15 +5,19 @@
 #include "stb_ds.h"
 
 typedef enum {
-    NODE_PROGRAM,
-    NODE_BLOCK,
-    NODE_VAR_DECL,
-    NODE_ASSIGN,
-    NODE_IF,
-    NODE_FUNC_CALL,
-    NODE_LITERAL_INT,
-    NODE_LITERAL_STRING,
-    NODE_VAR_REF
+    NODE_PROGRAM, // programa "Hello" { ... }
+    NODE_BLOCK, // { ... }
+    NODE_VAR_DECL, // var x: int = 10
+    NODE_ASSIGN, // x = 10
+    NODE_IF, // if (x > 10) { ... }
+    NODE_FUNC_CALL, // escreval("Hello")
+    NODE_LITERAL_INT, // 10
+    NODE_LITERAL_DOUBLE, // 10.5
+    NODE_LITERAL_FLOAT, // 10.5f
+    NODE_LITERAL_STRING, // "Hello"
+    NODE_VAR_REF, // x
+    NODE_BINARY_OP, // For x + y, x - y
+    NODE_UNARY_OP   // For -x
 } NodeType;
 
 typedef struct ASTNode {
@@ -23,6 +27,8 @@ typedef struct ASTNode {
     sds data_type;
     sds string_value;
     int int_value;
+    double double_value;
+    float float_value;
 } ASTNode;
 
 // Prototypes only!
