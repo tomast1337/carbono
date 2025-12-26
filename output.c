@@ -4,9 +4,15 @@
 int main() {
 {
     int x = 10;
+    float pi = 3.140000;
+    double e = 2.718280;
     char* msg = "Ola Carbono!";
-    if (x > 5) {
+    if (x > pi) {
     printf("%s\n", msg);
+}
+
+    if (pi > e) {
+    printf("%s\n", "π é Maior que e");
 }
 
 }

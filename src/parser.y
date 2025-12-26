@@ -71,11 +71,11 @@ var_decl:
     ;
 
 if_stmt:
-    /* Matches: se ( x > 5 ) { ... } */
-    TOKEN_SE '(' TOKEN_ID '>' TOKEN_LIT_INT ')' block {
+    /* Matches: se ( x > 5 ) { ... } or se ( x > pi ) { ... } */
+    TOKEN_SE '(' TOKEN_ID '>' expr ')' block {
         $$ = ast_new(NODE_IF);
         $$->name = sdsnew($3);      // Variable (x)
-        $$->int_value = $5;         // Value (5)
+        ast_add_child($$, $5);      // Right-hand expression
         ast_add_child($$, $7);      // Block
     }
     ;

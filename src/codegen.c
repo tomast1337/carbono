@@ -110,10 +110,18 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_IF:
-        // Currently our parser hardcodes 'x > val'
-        // We will make this generic later.
-        fprintf(file, "    if (%s > %d) ", node->name, node->int_value);
-        codegen(node->children[0], file); // The block
+        // se ( x > expr ) { ... }
+        // node->name is the left-hand variable
+        // node->children[0] is the right-hand expression
+        // node->children[1] is the block
+        fprintf(file, "    if (%s > ", node->name);
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Right-hand expression
+        }
+        fprintf(file, ") ");
+        if (arrlen(node->children) > 1) {
+            codegen(node->children[1], file); // The block
+        }
         fprintf(file, "\n");
         break;
 
