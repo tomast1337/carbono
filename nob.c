@@ -41,6 +41,7 @@ int main(int argc, char **argv)
     nob_cmd_append(&cmd, "src/main.c");
     nob_cmd_append(&cmd, "src/ast.c");
     nob_cmd_append(&cmd, "src/impl.c");
+    nob_cmd_append(&cmd, "src/debug.c");
     nob_cmd_append(&cmd, "deps/sds.c");
     nob_cmd_append(&cmd, "build/parser.tab.c");
     nob_cmd_append(&cmd, "src/codegen.c");

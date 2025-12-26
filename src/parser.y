@@ -24,8 +24,12 @@ ASTNode* root_node = NULL;
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
 
+%left '+' '-'
+%left '*' '/'
+%right '.'
+
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call
 
 %%
 
@@ -86,7 +90,11 @@ statement:
     var_decl
     | assign_stmt
     | input_stmt
-    | TOKEN_ID '(' expr ')' { 
+    | method_call {
+        /* Method call as statement: arr.len; or arr.push(x); */
+        $$ = $1;
+    }
+    | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
          $$->name = sdsnew($1);
@@ -95,11 +103,25 @@ statement:
     ;
 
 var_decl:
-    TOKEN_VAR TOKEN_ID ':' TOKEN_ID '=' expr {
+    TOKEN_VAR TOKEN_ID ':' type_def '=' expr {
         $$ = ast_new(NODE_VAR_DECL);
         $$->name = sdsnew($2);
-        $$->data_type = sdsnew($4);
+        $$->data_type = $4->string_value ? sdsnew($4->string_value) : sdsnew("void");
         ast_add_child($$, $6);
+    }
+    ;
+
+type_def:
+    TOKEN_ID {
+        $$ = ast_new(NODE_VAR_REF); // Reuse for type storage
+        $$->string_value = sdsnew($1);
+    }
+    | '[' type_def ']' {
+        // Recursive: [type] or [[type]] or [[[type]]]...
+        $$ = ast_new(NODE_VAR_REF);
+        sds inner = $2->string_value ? sdsnew($2->string_value) : sdsnew("");
+        $$->string_value = sdscat(sdsnew("["), inner);
+        $$->string_value = sdscat($$->string_value, "]");
     }
     ;
 
@@ -309,9 +331,34 @@ factor:
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
     }
+    | TOKEN_ID '[' expr ']' {
+        /* Array access: arr[0] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = sdsnew($1);
+        ast_add_child($$, $3); // Index expression
+    }
+    | factor '[' expr ']' {
+        /* Nested array access: arr[0][1] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = NULL; // Will be generated from child
+        ast_add_child($$, $1); // Base expression (could be another array access)
+        ast_add_child($$, $3); // Index expression
+    }
+    | method_call {
+        $$ = $1;
+    }
+    | array_literal {
+        $$ = $1;
+    }
     | TOKEN_LER '(' ')' {
         /* Expression: var x = ler() */
         $$ = ast_new(NODE_INPUT_VALUE);
+    }
+    | TOKEN_ID '(' expr ')' {
+        /* Function call as expression: formatar_texto("...") */
+        $$ = ast_new(NODE_FUNC_CALL);
+        $$->name = sdsnew($1);
+        ast_add_child($$, $3);
     }
     | '(' expr ')' {
         $$ = $2;
@@ -381,6 +428,56 @@ input_stmt:
     TOKEN_LER '(' ')' TOKEN_SEMICOLON {
         /* Statement: ler() - system pause */
         $$ = ast_new(NODE_INPUT_PAUSE);
+    }
+    ;
+
+array_literal:
+    '[' ']' {
+        /* Empty array */
+        $$ = ast_new(NODE_ARRAY_LITERAL);
+    }
+    | '[' expr_list ']' {
+        /* Array with elements */
+        $$ = $2; // expr_list already has the children
+    }
+    ;
+
+expr_list:
+    expr {
+        $$ = ast_new(NODE_ARRAY_LITERAL);
+        ast_add_child($$, $1);
+    }
+    | expr_list ',' expr {
+        $$ = $1;
+        ast_add_child($$, $3);
+    }
+    ;
+
+method_call:
+    factor '.' TOKEN_ID {
+        /* Method call on expression: arr.len or arr[0].len */
+        $$ = ast_new(NODE_METHOD_CALL);
+        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
+        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
+            $$->name = sdsnew($1->name);
+        } else {
+            $$->name = NULL; // Will be generated from child
+        }
+        $$->data_type = sdsnew($3); // Method name
+        ast_add_child($$, $1); // Base expression
+    }
+    | factor '.' TOKEN_ID '(' expr ')' {
+        /* Method call on expression with argument: arr.push(x) or arr[0].push(x) */
+        $$ = ast_new(NODE_METHOD_CALL);
+        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
+        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
+            $$->name = sdsnew($1->name);
+        } else {
+            $$->name = NULL; // Will be generated from child
+        }
+        $$->data_type = sdsnew($3); // Method name
+        ast_add_child($$, $1); // Base expression
+        ast_add_child($$, $5); // Argument
     }
     ;
 

@@ -2,9 +2,52 @@
 #include <string.h>
 #include "ast.h"
 
+// Helper to count array brackets and extract base type
+static int count_array_depth(const char *type, const char **base_type) {
+    int depth = 0;
+    const char *p = type;
+    while (*p == '[') {
+        depth++;
+        p++;
+    }
+    // Find the matching closing brackets
+    const char *end = type + strlen(type) - 1;
+    while (end > p && *end == ']') {
+        end--;
+    }
+    // Extract base type (between brackets)
+    size_t base_len = end - p + 1;
+    static char base[128];
+    if (base_len < sizeof(base)) {
+        strncpy(base, p, base_len);
+        base[base_len] = '\0';
+        *base_type = base;
+    } else {
+        *base_type = "void";
+    }
+    return depth;
+}
+
 // Helper to map VisualG types to C types
 const char *map_type(const char *type)
 {
+    // Check if it's an array type (starts with '[')
+    if (type && type[0] == '[') {
+        const char *base_type;
+        int depth = count_array_depth(type, &base_type);
+        
+        // Map base type
+        const char *c_base = map_type(base_type);
+        
+        // Build pointer type based on depth
+        static char result[256];
+        strcpy(result, c_base);
+        for (int i = 0; i < depth; i++) {
+            strcat(result, "*");
+        }
+        return result;
+    }
+    
     typedef struct
     {
         const char *src;
@@ -17,6 +60,7 @@ const char *map_type(const char *type)
         {"inteiro16", "short"},
         {"inteiro8", "signed char"},
         {"inteiro_arq", "long"},
+        {"inteiro", "int"}, // Alias
 
         {"byte", "unsigned char"},
         {"natural32", "unsigned int"},
@@ -27,6 +71,7 @@ const char *map_type(const char *type)
 
         {"real32", "float"},
         {"real64", "double"},
+        {"real", "double"}, // Alias
         {"real_ext", "long double"},
 
         {"booleano", "int"},
@@ -44,7 +89,6 @@ const char *map_type(const char *type)
         {"n32", "unsigned int"},
         {"n64", "unsigned long long"},
         {"n16", "unsigned short"},
-        // { "n8",       "unsigned char" }, // Optional: You missed this in your snippet, but it fits here.
 
         {"bool", "int"},
         {"r32", "float"},
@@ -121,7 +165,24 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
                 }
             } else {
                 // No options: ${x} -> Use generic macro
-                fprintf(file, "    printf(print_any(%s), %s);\n", var_buffer, var_buffer);
+                // Check if this is a method call (e.g., m.len, arr.push)
+                char* dot_pos = strchr(var_buffer, '.');
+                if (dot_pos != NULL) {
+                    // Method call: m.len -> arrlen(m), arr.push -> arrput(arr, ...)
+                    *dot_pos = '\0'; // Split at '.'
+                    char* method_name = dot_pos + 1;
+                    char* var_name = var_buffer;
+                    
+                    if (strcmp(method_name, "len") == 0) {
+                        fprintf(file, "    printf(print_any(arrlen(%s)), arrlen(%s));\n", var_name, var_name);
+                    } else {
+                        // Unknown method, just output as-is (will cause compile error)
+                        fprintf(file, "    printf(print_any(%s.%s), %s.%s);\n", var_name, method_name, var_name, method_name);
+                    }
+                } else {
+                    // Regular variable
+                    fprintf(file, "    printf(print_any(%s), %s);\n", var_buffer, var_buffer);
+                }
             }
         } 
         // CASE B: Normal Text
@@ -163,7 +224,15 @@ void codegen_block(ASTNode *node, FILE *file)
     fprintf(file, "{\n");
     for (int i = 0; i < arrlen(node->children); i++)
     {
-        codegen(node->children[i], file);
+        ASTNode* child = node->children[i];
+        // Method calls used as statements need indentation and semicolon
+        if (child->type == NODE_METHOD_CALL) {
+            fprintf(file, "    ");
+            codegen(child, file);
+            fprintf(file, ";\n");
+        } else {
+            codegen(child, file);
+        }
     }
     fprintf(file, "}\n");
 }
@@ -178,7 +247,10 @@ void codegen(ASTNode *node, FILE *file)
     case NODE_PROGRAM:
         fprintf(file, "#include <stdio.h>\n");
         fprintf(file, "#include <stdlib.h>\n");
-        fprintf(file, "#include \"sds.h\"\n\n");
+        fprintf(file, "#include <stdarg.h>\n");
+        fprintf(file, "#include \"sds.h\"\n");
+        fprintf(file, "#define STB_DS_IMPLEMENTATION\n");
+        fprintf(file, "#include \"stb_ds.h\"\n\n");
         fprintf(file, "// Auto-typing macro for printf\n");
         fprintf(file, "#define print_any(x) _Generic((x), \\\n");
         fprintf(file, "    int: \"%%d\", \\\n");
@@ -219,6 +291,17 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
         fprintf(file, "    flush_input();\n");
         fprintf(file, "}\n\n");
+        fprintf(file, "// formatar_texto: Formats a string using printf-style format and variadic arguments\n");
+        fprintf(file, "// User-accessible function for string formatting with interpolation\n");
+        fprintf(file, "// Example: formatar_texto(\"Value: %%d\", 42) returns a new SDS string\n");
+        fprintf(file, "sds formatar_texto(const char* fmt, ...) {\n");
+        fprintf(file, "    sds result = sdsempty();\n");
+        fprintf(file, "    va_list ap;\n");
+        fprintf(file, "    va_start(ap, fmt);\n");
+        fprintf(file, "    result = sdscatvprintf(result, fmt, ap);\n");
+        fprintf(file, "    va_end(ap);\n");
+        fprintf(file, "    return result;\n");
+        fprintf(file, "}\n\n");
         fprintf(file, "int main() {\n");
         // Generate the body (the block inside the program)
         for (int i = 0; i < arrlen(node->children); i++)
@@ -235,7 +318,16 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_VAR_DECL:
         // var x: type = val -> int x = val;
-        fprintf(file, "    %s %s = ", map_type(node->data_type), node->name);
+        const char* var_type = map_type(node->data_type);
+        int is_texto = (strcmp(var_type, "char*") == 0);
+        
+        if (is_texto) {
+            // For texto (char*), use sds type
+            fprintf(file, "    sds %s = ", node->name);
+        } else {
+            fprintf(file, "    %s %s = ", var_type, node->name);
+        }
+        
         // We expect one child: the expression for the value
         if (arrlen(node->children) > 0)
         {
@@ -257,6 +349,76 @@ void codegen(ASTNode *node, FILE *file)
                 } else {
                     fprintf(file, "read_int()"); // fallback
                 }
+            } else if (init_node->type == NODE_LITERAL_STRING) {
+                // String literal initialization
+                if (is_texto) {
+                    // For texto, convert string literal to SDS
+                    // Check if it's an empty string
+                    if (init_node->string_value && strlen(init_node->string_value) == 0) {
+                        fprintf(file, "sdsempty()");
+                    } else {
+                        fprintf(file, "sdsnew(");
+                        codegen(init_node, file);
+                        fprintf(file, ")");
+                    }
+                } else {
+                    codegen(init_node, file);
+                }
+            } else if (init_node->type == NODE_ARRAY_LITERAL) {
+                // Array literal initialization - handle nested arrays
+                fprintf(file, "NULL;\n");
+                
+                // Check if this is a nested array (2D, 3D, etc.)
+                const char* type_str = node->data_type ? node->data_type : "";
+                int depth = 0;
+                const char* p = type_str;
+                while (p && *p == '[') { depth++; p++; }
+                
+                if (depth > 1) {
+                    // Nested array: each child is itself an array literal
+                    for (int i = 0; i < arrlen(init_node->children); i++) {
+                        ASTNode* row = init_node->children[i];
+                        if (row && row->type == NODE_ARRAY_LITERAL) {
+                            // Create row array
+                            fprintf(file, "    {\n");
+                            // Get inner type (remove one bracket level)
+                            // For [[inteiro32]], we want [inteiro32] -> int*
+                            // Extract base type from inner array type
+                            const char* base_type;
+                            sds inner_type = sdsnew(type_str);
+                            if (inner_type[0] == '[' && inner_type[strlen(inner_type)-1] == ']') {
+                                inner_type[strlen(inner_type)-1] = '\0';
+                                memmove(inner_type, inner_type + 1, strlen(inner_type));
+                            }
+                            // inner_type is now [inteiro32], extract base type
+                            count_array_depth(inner_type, &base_type);
+                            const char* c_base = map_type(base_type);
+                            fprintf(file, "        %s* row_%d = NULL;\n", c_base, i);
+                            sdsfree(inner_type);
+                            
+                            for (int j = 0; j < arrlen(row->children); j++) {
+                                fprintf(file, "        arrput(row_%d, ", i);
+                                codegen(row->children[j], file);
+                                fprintf(file, ");\n");
+                            }
+                            fprintf(file, "        arrput(%s, row_%d);\n", node->name, i);
+                            fprintf(file, "    }\n");
+                        } else {
+                            // Single element (shouldn't happen in nested, but handle it)
+                            fprintf(file, "    arrput(%s, ", node->name);
+                            codegen(row, file);
+                            fprintf(file, ");\n");
+                        }
+                    }
+                } else {
+                    // 1D array: simple initialization
+                    for (int i = 0; i < arrlen(init_node->children); i++) {
+                        fprintf(file, "    arrput(%s, ", node->name);
+                        codegen(init_node->children[i], file);
+                        fprintf(file, ");\n");
+                    }
+                }
+                return; // Already printed semicolon
             } else {
                 codegen(init_node, file);
             }
@@ -266,23 +428,52 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_ASSIGN:
         // x = expr -> x = expr;
-        // TODO: When Symbol Table is implemented, check if expr is NODE_INPUT_VALUE
-        // and use get_var_type(node->name) to determine the correct read function
-        // For now, assignments with ler() will need to be done at declaration time
-        fprintf(file, "    %s = ", node->name);
+        // For texto (sds) variables, we need to free the old value after evaluating the new one
+        fprintf(file, "    ");
+        
+        // Check if this might be a texto assignment (SDS string)
+        // We detect this by checking if the expression uses SDS functions
+        int might_be_sds = 0;
         if (arrlen(node->children) > 0) {
             ASTNode* value_node = node->children[0];
-            // Check if assignment value is ler()
-            if (value_node->type == NODE_INPUT_VALUE) {
-                // TODO: Use Symbol Table to lookup variable type: get_var_type(node->name)
-                // Then map to appropriate read function based on type
-                // This will be properly implemented with Symbol Table
-                fprintf(file, "read_int()"); // Temporary fallback - will be fixed with Symbol Table
-            } else {
-                codegen(value_node, file); // Expression value
+            // Check if it's a binary op with strings, or formatar_texto call, or sdscat
+            if (value_node->type == NODE_BINARY_OP) {
+                const char* op = value_node->data_type ? value_node->data_type : "";
+                if (strcmp(op, "+") == 0) {
+                    might_be_sds = 1; // String concatenation uses SDS
+                }
+            } else if (value_node->type == NODE_FUNC_CALL && 
+                       value_node->name && strcmp(value_node->name, "formatar_texto") == 0) {
+                might_be_sds = 1; // formatar_texto returns SDS
             }
         }
-        fprintf(file, ";\n");
+        
+        if (might_be_sds) {
+            // For SDS strings, evaluate expression first, then free old, then assign
+            // Use a temporary variable to hold the new value
+            fprintf(file, "{ sds _temp_%s = ", node->name);
+            if (arrlen(node->children) > 0) {
+                ASTNode* value_node = node->children[0];
+                if (value_node->type == NODE_INPUT_VALUE) {
+                    fprintf(file, "read_int()");
+                } else {
+                    codegen(value_node, file);
+                }
+            }
+            fprintf(file, "; sdsfree(%s); %s = _temp_%s; }\n", node->name, node->name, node->name);
+        } else {
+            // Regular assignment
+            fprintf(file, "%s = ", node->name);
+            if (arrlen(node->children) > 0) {
+                ASTNode* value_node = node->children[0];
+                if (value_node->type == NODE_INPUT_VALUE) {
+                    fprintf(file, "read_int()");
+                } else {
+                    codegen(value_node, file);
+                }
+            }
+            fprintf(file, ";\n");
+        }
         break;
 
     case NODE_IF:
@@ -350,12 +541,92 @@ void codegen(ASTNode *node, FILE *file)
                 fprintf(file, "    printf(\"\\n\");\n");
             }
         }
+        // Special handling for 'formatar_texto' -> process ${var} interpolation
+        else if (strcmp(node->name, "formatar_texto") == 0)
+        {
+            if (arrlen(node->children) > 0 && node->children[0]->type == NODE_LITERAL_STRING) {
+                // Process string literal with ${var} interpolation
+                const char* fmt_str = node->children[0]->string_value;
+                fprintf(file, "formatar_texto(\"");
+                
+                // Process format string: convert ${var} to printf format specifiers
+                const char* cursor = fmt_str;
+                while (*cursor != '\0') {
+                    if (cursor[0] == '$' && cursor[1] == '{') {
+                        cursor += 2; // Skip "${"
+                        // Extract variable name
+                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':') {
+                            cursor++;
+                        }
+                        // Handle format specifier
+                        if (*cursor == ':') {
+                            cursor++; // Skip ':'
+                            // Extract format specifier
+                            fprintf(file, "%%");
+                            while (*cursor != '\0' && *cursor != '}') {
+                                fputc(*cursor++, file);
+                            }
+                        } else {
+                            fprintf(file, "%%d"); // Default to integer
+                        }
+                        if (*cursor == '}') cursor++;
+                    } else {
+                        // Escape special characters for printf
+                        if (*cursor == '%') {
+                            fprintf(file, "%%");
+                        } else if (*cursor == '"') {
+                            fprintf(file, "\\\"");
+                        } else if (*cursor == '\\') {
+                            fprintf(file, "\\\\");
+                        } else {
+                            fputc(*cursor, file);
+                        }
+                        cursor++;
+                    }
+                }
+                fprintf(file, "\"");
+                
+                // Extract and pass variable values as arguments
+                cursor = fmt_str;
+                while (*cursor != '\0') {
+                    if (cursor[0] == '$' && cursor[1] == '{') {
+                        cursor += 2;
+                        char var_name[256] = {0};
+                        int idx = 0;
+                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':' && idx < 255) {
+                            var_name[idx++] = *cursor++;
+                        }
+                        if (*cursor == ':') {
+                            while (*cursor != '\0' && *cursor != '}') cursor++;
+                        }
+                        if (*cursor == '}') cursor++;
+                        
+                        // Generate code to pass the variable value
+                        fprintf(file, ", %s", var_name);
+                    } else {
+                        cursor++;
+                    }
+                }
+                fprintf(file, ")");
+            } else {
+                // formatar_texto called with non-string argument - just pass through
+                fprintf(file, "formatar_texto(");
+                if (arrlen(node->children) > 0) {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, ")");
+            }
+        }
         else
         {
             // Generic function call
-            fprintf(file, "    %s(", node->name);
-            // Arguments would go here
-            fprintf(file, ");\n");
+            fprintf(file, "%s(", node->name);
+            // Arguments
+            for (int i = 0; i < arrlen(node->children); i++) {
+                if (i > 0) fprintf(file, ", ");
+                codegen(node->children[i], file);
+            }
+            fprintf(file, ")");
         }
         break;
 
@@ -384,15 +655,196 @@ void codegen(ASTNode *node, FILE *file)
         // node->data_type contains the operator
         // node->children[0] is left operand
         // node->children[1] is right operand
-        fprintf(file, "(");
-        if (arrlen(node->children) > 0) {
-            codegen(node->children[0], file);
+        const char* bin_op = node->data_type ? node->data_type : "+";
+        
+        // Check if this is string concatenation (both operands are strings)
+        int is_string_op = 0;
+        if (strcmp(bin_op, "+") == 0 && arrlen(node->children) >= 2) {
+            ASTNode* left = node->children[0];
+            ASTNode* right = node->children[1];
+            // Check if either operand is a string literal (definitely a string)
+            int left_is_string = (left->type == NODE_LITERAL_STRING);
+            int right_is_string = (right->type == NODE_LITERAL_STRING);
+            
+            // Check if right operand is formatar_texto call (returns SDS string)
+            int right_is_formatar = (right->type == NODE_FUNC_CALL && 
+                                     right->name && strcmp(right->name, "formatar_texto") == 0);
+            
+            // If either is a string literal, or right is formatar_texto, treat as string concatenation
+            if (left_is_string || right_is_string || right_is_formatar) {
+                is_string_op = 1;
+            }
         }
-        fprintf(file, " %s ", node->data_type ? node->data_type : "+");
-        if (arrlen(node->children) > 1) {
-            codegen(node->children[1], file);
+        
+        if (is_string_op) {
+            // String concatenation: use formatar_texto for strings with interpolation, sdscat for simple strings
+            ASTNode* left = arrlen(node->children) > 0 ? node->children[0] : NULL;
+            ASTNode* right = arrlen(node->children) > 1 ? node->children[1] : NULL;
+            
+            // Check if right operand is a string literal with interpolation
+            int right_has_interpolation = 0;
+            if (right && right->type == NODE_LITERAL_STRING && right->string_value) {
+                if (strstr(right->string_value, "${") != NULL) {
+                    right_has_interpolation = 1;
+                }
+            }
+            
+            if (right_has_interpolation) {
+                // Process interpolation at compile time and use formatar_texto
+                // Convert ${var} to %d/%s etc. and extract variable names
+                const char* fmt_str = right->string_value;
+                
+                // Concatenate: left + formatar_texto(right)
+                fprintf(file, "sdscatsds(");
+                // Left operand (base string)
+                if (left) {
+                    if (left->type == NODE_LITERAL_STRING) {
+                        fprintf(file, "sdsnew(");
+                        codegen(left, file);
+                        fprintf(file, ")");
+                    } else {
+                        codegen(left, file);
+                    }
+                } else {
+                    fprintf(file, "sdsempty()");
+                }
+                fprintf(file, ", formatar_texto(\"");
+                // Process format string: convert ${var} to printf format specifiers
+                const char* cursor = fmt_str;
+                while (*cursor != '\0') {
+                    if (cursor[0] == '$' && cursor[1] == '{') {
+                        cursor += 2; // Skip "${"
+                        // Extract variable name
+                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':') {
+                            cursor++;
+                        }
+                        // For now, use %s as default (we'll improve this later)
+                        if (*cursor == ':') {
+                            cursor++; // Skip ':'
+                            // Extract format specifier
+                            fprintf(file, "%%");
+                            while (*cursor != '\0' && *cursor != '}') {
+                                fputc(*cursor++, file);
+                            }
+                        } else {
+                            // Default format: try to detect type from variable name
+                            // For array access like m[r][c], assume integer
+                            // For simple variables, we'd need symbol table - use %d as default for now
+                            fprintf(file, "%%d"); // Default to integer (most common case)
+                        }
+                        if (*cursor == '}') cursor++;
+                    } else {
+                        // Escape special characters for printf
+                        if (*cursor == '%') {
+                            fprintf(file, "%%");
+                        } else if (*cursor == '"') {
+                            fprintf(file, "\\\"");
+                        } else if (*cursor == '\\') {
+                            fprintf(file, "\\\\");
+                        } else {
+                            fputc(*cursor, file);
+                        }
+                        cursor++;
+                    }
+                }
+                fprintf(file, "\"");
+                
+                // Extract and pass variable values as arguments
+                // For now, we'll generate a simplified version
+                // In practice, we'd parse the format string and extract all variables
+                cursor = fmt_str;
+                while (*cursor != '\0') {
+                    if (cursor[0] == '$' && cursor[1] == '{') {
+                        cursor += 2;
+                        char var_name[256] = {0};
+                        int idx = 0;
+                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':' && idx < 255) {
+                            var_name[idx++] = *cursor++;
+                        }
+                        if (*cursor == ':') {
+                            while (*cursor != '\0' && *cursor != '}') cursor++;
+                        }
+                        if (*cursor == '}') cursor++;
+                        
+                        // Generate code to pass the variable value
+                        // For now, we'll need to evaluate var_name - this is complex
+                        // For simplicity, assume it's a direct variable reference
+                        fprintf(file, ", %s", var_name);
+                    } else {
+                        cursor++;
+                    }
+                }
+                
+                fprintf(file, ")");
+            } else {
+                // Simple string concatenation without interpolation
+                // Check if right is formatar_texto (returns SDS) or if left is SDS variable
+                int right_is_formatar = (right && right->type == NODE_FUNC_CALL && 
+                                         right->name && strcmp(right->name, "formatar_texto") == 0);
+                int left_is_sds_var = (left && left->type == NODE_VAR_REF);
+                
+                if (right_is_formatar || left_is_sds_var) {
+                    // Use sdscatsds when dealing with SDS strings
+                    fprintf(file, "sdscatsds(");
+                    if (left) {
+                        if (left->type == NODE_LITERAL_STRING) {
+                            fprintf(file, "sdsnew(");
+                            codegen(left, file);
+                            fprintf(file, ")");
+                        } else {
+                            codegen(left, file);
+                        }
+                    } else {
+                        fprintf(file, "sdsempty()");
+                    }
+                    fprintf(file, ", ");
+                    if (right) {
+                        if (right->type == NODE_LITERAL_STRING) {
+                            fprintf(file, "sdsnew(");
+                            codegen(right, file);
+                            fprintf(file, ")");
+                        } else {
+                            codegen(right, file);
+                        }
+                    }
+                    fprintf(file, ")");
+                } else {
+                    // Use sdscat for C string concatenation
+                    fprintf(file, "sdscat(");
+                    if (left) {
+                        if (left->type == NODE_LITERAL_STRING) {
+                            fprintf(file, "sdsnew(");
+                            codegen(left, file);
+                            fprintf(file, ")");
+                        } else {
+                            codegen(left, file);
+                        }
+                    } else {
+                        fprintf(file, "sdsempty()");
+                    }
+                    fprintf(file, ", ");
+                    if (right) {
+                        if (right->type == NODE_LITERAL_STRING) {
+                            codegen(right, file);
+                        } else {
+                            codegen(right, file);
+                        }
+                    }
+                    fprintf(file, ")");
+                }
+            }
+        } else {
+            // Regular arithmetic operation
+            fprintf(file, "(");
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, " %s ", bin_op);
+            if (arrlen(node->children) > 1) {
+                codegen(node->children[1], file);
+            }
+            fprintf(file, ")");
         }
-        fprintf(file, ")");
         break;
 
     case NODE_INFINITO:
@@ -454,6 +906,104 @@ void codegen(ASTNode *node, FILE *file)
     case NODE_INPUT_VALUE:
         // This should only appear as a child of NODE_VAR_DECL
         // Handled in NODE_VAR_DECL case
+        break;
+
+    case NODE_ARRAY_LITERAL:
+        // Array literals can be used in method calls: arr.push([1, 2, 3])
+        // Generate a temporary array variable
+        static int array_literal_counter = 0;
+        int temp_id = array_literal_counter++;
+        
+        // Infer type from first element (if available)
+        const char* elem_type = "int"; // Default
+        if (arrlen(node->children) > 0) {
+            ASTNode* first = node->children[0];
+            if (first->type == NODE_LITERAL_INT) {
+                elem_type = "int";
+            } else if (first->type == NODE_LITERAL_FLOAT || first->type == NODE_LITERAL_DOUBLE) {
+                elem_type = "double";
+            }
+        }
+        
+        fprintf(file, "({\n");
+        fprintf(file, "        %s* temp_arr_%d = NULL;\n", elem_type, temp_id);
+        for (int i = 0; i < arrlen(node->children); i++) {
+            fprintf(file, "        arrput(temp_arr_%d, ", temp_id);
+            codegen(node->children[i], file);
+            fprintf(file, ");\n");
+        }
+        fprintf(file, "        temp_arr_%d;\n", temp_id);
+        fprintf(file, "    })");
+        break;
+
+    case NODE_ARRAY_ACCESS:
+        // arr[0] or arr[0][1]
+        if (node->name) {
+            // Simple access: arr[0]
+            fprintf(file, "%s[", node->name);
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file); // Index
+            }
+            fprintf(file, "]");
+        } else if (arrlen(node->children) >= 2) {
+            // Nested access: arr[0][1]
+            codegen(node->children[0], file); // Base (could be another array access)
+            fprintf(file, "[");
+            codegen(node->children[1], file); // Index
+            fprintf(file, "]");
+        }
+        break;
+
+    case NODE_METHOD_CALL:
+        // arr.len, arr.push(x), arr.pop()
+        // Note: This can be used as an expression (in loops, assignments) or as a statement
+        // We detect statement usage by checking the parent node type
+        // For now, we'll generate without indentation/semicolon and let the parent handle it
+        const char* method = node->data_type ? node->data_type : "";
+        
+        if (strcmp(method, "len") == 0) {
+            // arr.len -> arrlen(arr)
+            fprintf(file, "arrlen(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        } else if (strcmp(method, "push") == 0) {
+            // arr.push(x) -> arrput(arr, x)
+            fprintf(file, "arrput(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ", ");
+            // Push value: when node->name exists, base is stored in name, argument is in children[1]
+            // When node->name is NULL, base is in children[0], argument is in children[1]
+            int value_idx = 1; // Argument is always the second child (index 1)
+            if (arrlen(node->children) > value_idx) {
+                codegen(node->children[value_idx], file);
+            }
+            fprintf(file, ")");
+        } else if (strcmp(method, "pop") == 0) {
+            // arr.pop() -> arrpop(arr)
+            fprintf(file, "arrpop(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        } else {
+            // Unknown method
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ".%s", method);
+        }
         break;
 
     default:

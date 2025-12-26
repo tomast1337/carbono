@@ -24,7 +24,10 @@ typedef enum {
     NODE_BREAK, // parar;
     NODE_CONTINUE, // continuar;
     NODE_INPUT_VALUE, // ler() as expression
-    NODE_INPUT_PAUSE // ler() as statement
+    NODE_INPUT_PAUSE, // ler() as statement
+    NODE_ARRAY_LITERAL, // [1, 2, 3]
+    NODE_ARRAY_ACCESS, // arr[0] or arr[0][1]
+    NODE_METHOD_CALL // arr.len, arr.push(x)
 } NodeType;
 
 typedef struct ASTNode {
