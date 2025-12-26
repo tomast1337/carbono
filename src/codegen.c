@@ -295,17 +295,6 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
         fprintf(file, "    flush_input();\n");
         fprintf(file, "}\n\n");
-        fprintf(file, "// formatar_texto: Formats a string using printf-style format and variadic arguments\n");
-        fprintf(file, "// User-accessible function for string formatting with interpolation\n");
-        fprintf(file, "// Example: formatar_texto(\"Value: %%d\", 42) returns a new SDS string\n");
-        fprintf(file, "sds formatar_texto(const char* fmt, ...) {\n");
-        fprintf(file, "    sds result = sdsempty();\n");
-        fprintf(file, "    va_list ap;\n");
-        fprintf(file, "    va_start(ap, fmt);\n");
-        fprintf(file, "    result = sdscatvprintf(result, fmt, ap);\n");
-        fprintf(file, "    va_end(ap);\n");
-        fprintf(file, "    return result;\n");
-        fprintf(file, "}\n\n");
         fprintf(file, "int main() {\n");
         // Generate the body (the block inside the program)
         for (int i = 0; i < arrlen(node->children); i++)
@@ -438,68 +427,36 @@ void codegen(ASTNode *node, FILE *file)
         // For texto (sds) variables, we need to free the old value after evaluating the new one
         fprintf(file, "    ");
         
-        // Check if this might be a texto assignment (SDS string)
-        // We detect this by checking if the expression uses SDS functions
-        int might_be_sds = 0;
+        // Regular assignment
+        fprintf(file, "%s = ", node->name);
         if (arrlen(node->children) > 0) {
             ASTNode* value_node = node->children[0];
-            // Check if it's a binary op with strings, or formatar_texto call, or sdscat
-            if (value_node->type == NODE_BINARY_OP) {
-                const char* op = value_node->data_type ? value_node->data_type : "";
-                if (strcmp(op, "+") == 0) {
-                    might_be_sds = 1; // String concatenation uses SDS
-                }
-            } else if (value_node->type == NODE_FUNC_CALL && 
-                       value_node->name && strcmp(value_node->name, "formatar_texto") == 0) {
-                might_be_sds = 1; // formatar_texto returns SDS
-            }
-        }
-        
-        if (might_be_sds) {
-            // For SDS strings, evaluate expression first, then free old, then assign
-            // Use a temporary variable to hold the new value
-            fprintf(file, "{ sds _temp_%s = ", node->name);
-            if (arrlen(node->children) > 0) {
-                ASTNode* value_node = node->children[0];
-                if (value_node->type == NODE_INPUT_VALUE) {
-                    fprintf(file, "read_int()");
-                } else {
-                    codegen(value_node, file);
-                }
-            }
-            fprintf(file, "; sdsfree(%s); %s = _temp_%s; }\n", node->name, node->name, node->name);
-        } else {
-            // Regular assignment
-            fprintf(file, "%s = ", node->name);
-            if (arrlen(node->children) > 0) {
-                ASTNode* value_node = node->children[0];
-                if (value_node->type == NODE_INPUT_VALUE) {
-                    // Use Symbol Table to lookup variable type
-                    char* var_type = scope_lookup(node->name);
-                    if (var_type) {
-                        const char* c_type = map_type(var_type);
-                        if (strcmp(c_type, "int") == 0) {
-                            fprintf(file, "read_int()");
-                        } else if (strcmp(c_type, "long long") == 0) {
-                            fprintf(file, "read_long()");
-                        } else if (strcmp(c_type, "float") == 0) {
-                            fprintf(file, "read_float()");
-                        } else if (strcmp(c_type, "double") == 0) {
-                            fprintf(file, "read_double()");
-                        } else if (strcmp(c_type, "char*") == 0) {
-                            fprintf(file, "read_string()");
-                        } else {
-                            fprintf(file, "read_int()");
-                        }
+            if (value_node->type == NODE_INPUT_VALUE) {
+                // Use Symbol Table to lookup variable type
+                char* var_type = scope_lookup(node->name);
+                if (var_type) {
+                    const char* c_type = map_type(var_type);
+                    if (strcmp(c_type, "int") == 0) {
+                        fprintf(file, "read_int()");
+                    } else if (strcmp(c_type, "long long") == 0) {
+                        fprintf(file, "read_long()");
+                    } else if (strcmp(c_type, "float") == 0) {
+                        fprintf(file, "read_float()");
+                    } else if (strcmp(c_type, "double") == 0) {
+                        fprintf(file, "read_double()");
+                    } else if (strcmp(c_type, "char*") == 0) {
+                        fprintf(file, "read_string()");
                     } else {
                         fprintf(file, "read_int()");
                     }
                 } else {
-                    codegen(value_node, file);
+                    fprintf(file, "read_int()");
                 }
+            } else {
+                codegen(value_node, file);
             }
-            fprintf(file, ";\n");
         }
+        fprintf(file, ";\n");
         break;
 
     case NODE_IF:
@@ -567,153 +524,6 @@ void codegen(ASTNode *node, FILE *file)
                 fprintf(file, "    printf(\"\\n\");\n");
             }
         }
-        // Special handling for 'formatar_texto' -> process ${var} interpolation
-        else if (strcmp(node->name, "formatar_texto") == 0)
-        {
-            if (arrlen(node->children) > 0 && node->children[0]->type == NODE_LITERAL_STRING) {
-                // Process string literal with ${var} interpolation
-                const char* fmt_str = node->children[0]->string_value;
-                fprintf(file, "formatar_texto(\"");
-                
-                // Process format string: convert ${var} to printf format specifiers
-                const char* cursor = fmt_str;
-                while (*cursor != '\0') {
-                    if (cursor[0] == '$' && cursor[1] == '{') {
-                        cursor += 2; // Skip "${"
-                        // Extract variable name
-                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':') {
-                            cursor++;
-                        }
-                        // Handle format specifier
-                        if (*cursor == ':') {
-                            cursor++; // Skip ':'
-                            // Extract format specifier
-                            fprintf(file, "%%");
-                            while (*cursor != '\0' && *cursor != '}') {
-                                fputc(*cursor++, file);
-                            }
-                        } else {
-                            // Try to determine type from symbol table
-                            // We need to extract the expression and find the base variable
-                            // Go back to start of expression
-                            const char* expr_start = cursor - 2; // Back to "${"
-                            char var_expr[256] = {0};
-                            int expr_idx = 0;
-                            const char* temp_cursor = cursor;
-                            while (*temp_cursor != '\0' && *temp_cursor != '}' && *temp_cursor != ':' && expr_idx < 255) {
-                                var_expr[expr_idx++] = *temp_cursor++;
-                            }
-                            
-                            // Extract base variable name (everything before first '[')
-                            char base_var[128] = {0};
-                            int base_idx = 0;
-                            for (int i = 0; i < expr_idx && var_expr[i] != '[' && base_idx < 127; i++) {
-                                base_var[base_idx++] = var_expr[i];
-                            }
-                            
-                            // Count array accesses in expression
-                            int array_accesses = 0;
-                            for (int i = 0; i < expr_idx; i++) {
-                                if (var_expr[i] == '[') array_accesses++;
-                            }
-                            
-                            // Look up base variable type in symbol table
-                            char* var_type = scope_lookup(base_var);
-                            if (var_type && array_accesses > 0) {
-                                // Calculate resulting type after array accesses
-                                int original_depth = get_array_depth(var_type);
-                                int remaining_depth = original_depth - array_accesses;
-                                
-                                if (remaining_depth <= 0) {
-                                    // We've accessed all array dimensions, get base type
-                                    char* base_type = get_base_type(var_type);
-                                    if (base_type) {
-                                        const char* c_type = map_type(base_type);
-                                        // Map C type to printf format
-                                        if (strcmp(c_type, "int") == 0 || strcmp(c_type, "long long") == 0 || 
-                                            strcmp(c_type, "short") == 0 || strcmp(c_type, "signed char") == 0) {
-                                            fprintf(file, "%%d");
-                                        } else if (strcmp(c_type, "float") == 0 || strcmp(c_type, "double") == 0) {
-                                            fprintf(file, "%%f");
-                                        } else if (strcmp(c_type, "char*") == 0) {
-                                            fprintf(file, "%%s");
-                                        } else {
-                                            fprintf(file, "%%d"); // Default
-                                        }
-                                    } else {
-                                        fprintf(file, "%%d"); // Fallback
-                                    }
-                                } else {
-                                    // Still an array, shouldn't happen in formatar_texto, but handle it
-                                    fprintf(file, "%%d");
-                                }
-                            } else if (var_type) {
-                                // Simple variable (no array access), use its type directly
-                                const char* c_type = map_type(var_type);
-                                if (strcmp(c_type, "int") == 0 || strcmp(c_type, "long long") == 0 || 
-                                    strcmp(c_type, "short") == 0 || strcmp(c_type, "signed char") == 0) {
-                                    fprintf(file, "%%d");
-                                } else if (strcmp(c_type, "float") == 0 || strcmp(c_type, "double") == 0) {
-                                    fprintf(file, "%%f");
-                                } else if (strcmp(c_type, "char*") == 0) {
-                                    fprintf(file, "%%s");
-                                } else {
-                                    fprintf(file, "%%d");
-                                }
-                            } else {
-                                // Variable not found in symbol table, default to integer
-                                fprintf(file, "%%d");
-                            }
-                        }
-                        if (*cursor == '}') cursor++;
-                    } else {
-                        // Escape special characters for printf
-                        if (*cursor == '%') {
-                            fprintf(file, "%%");
-                        } else if (*cursor == '"') {
-                            fprintf(file, "\\\"");
-                        } else if (*cursor == '\\') {
-                            fprintf(file, "\\\\");
-                        } else {
-                            fputc(*cursor, file);
-                        }
-                        cursor++;
-                    }
-                }
-                fprintf(file, "\"");
-                
-                // Extract and pass variable values as arguments
-                cursor = fmt_str;
-                while (*cursor != '\0') {
-                    if (cursor[0] == '$' && cursor[1] == '{') {
-                        cursor += 2;
-                        char var_expr[256] = {0};
-                        int idx = 0;
-                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':' && idx < 255) {
-                            var_expr[idx++] = *cursor++;
-                        }
-                        if (*cursor == ':') {
-                            while (*cursor != '\0' && *cursor != '}') cursor++;
-                        }
-                        if (*cursor == '}') cursor++;
-                        
-                        // Generate code to pass the variable/expression value
-                        // var_expr might be a simple variable or an expression like "m[r][c]"
-                        fprintf(file, ", %s", var_expr);
-                    } else {
-                        cursor++;
-                    }
-                }
-                fprintf(file, ")");
-            } else {
-                // formatar_texto called with non-string argument - just pass through
-                fprintf(file, "formatar_texto(");
-                if (arrlen(node->children) > 0) {
-                    codegen(node->children[0], file);
-                }
-                fprintf(file, ")");
-            }
-        }
         else
         {
             // Generic function call
@@ -754,194 +564,15 @@ void codegen(ASTNode *node, FILE *file)
         // node->children[1] is right operand
         const char* bin_op = node->data_type ? node->data_type : "+";
         
-        // Check if this is string concatenation (both operands are strings)
-        int is_string_op = 0;
-        if (strcmp(bin_op, "+") == 0 && arrlen(node->children) >= 2) {
-            ASTNode* left = node->children[0];
-            ASTNode* right = node->children[1];
-            // Check if either operand is a string literal (definitely a string)
-            int left_is_string = (left->type == NODE_LITERAL_STRING);
-            int right_is_string = (right->type == NODE_LITERAL_STRING);
-            
-            // Check if right operand is formatar_texto call (returns SDS string)
-            int right_is_formatar = (right->type == NODE_FUNC_CALL && 
-                                     right->name && strcmp(right->name, "formatar_texto") == 0);
-            
-            // If either is a string literal, or right is formatar_texto, treat as string concatenation
-            if (left_is_string || right_is_string || right_is_formatar) {
-                is_string_op = 1;
-            }
+        fprintf(file, "(");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file);
         }
-        
-        if (is_string_op) {
-            // String concatenation: use formatar_texto for strings with interpolation, sdscat for simple strings
-            ASTNode* left = arrlen(node->children) > 0 ? node->children[0] : NULL;
-            ASTNode* right = arrlen(node->children) > 1 ? node->children[1] : NULL;
-            
-            // Check if right operand is a string literal with interpolation
-            int right_has_interpolation = 0;
-            if (right && right->type == NODE_LITERAL_STRING && right->string_value) {
-                if (strstr(right->string_value, "${") != NULL) {
-                    right_has_interpolation = 1;
-                }
-            }
-            
-            if (right_has_interpolation) {
-                // Process interpolation at compile time and use formatar_texto
-                // Convert ${var} to %d/%s etc. and extract variable names
-                const char* fmt_str = right->string_value;
-                
-                // Concatenate: left + formatar_texto(right)
-                fprintf(file, "sdscatsds(");
-                // Left operand (base string)
-                if (left) {
-                    if (left->type == NODE_LITERAL_STRING) {
-                        fprintf(file, "sdsnew(");
-                        codegen(left, file);
-                        fprintf(file, ")");
-                    } else {
-                        codegen(left, file);
-                    }
-                } else {
-                    fprintf(file, "sdsempty()");
-                }
-                fprintf(file, ", formatar_texto(\"");
-                // Process format string: convert ${var} to printf format specifiers
-                const char* cursor = fmt_str;
-                while (*cursor != '\0') {
-                    if (cursor[0] == '$' && cursor[1] == '{') {
-                        cursor += 2; // Skip "${"
-                        // Extract variable name
-                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':') {
-                            cursor++;
-                        }
-                        // For now, use %s as default (we'll improve this later)
-                        if (*cursor == ':') {
-                            cursor++; // Skip ':'
-                            // Extract format specifier
-                            fprintf(file, "%%");
-                            while (*cursor != '\0' && *cursor != '}') {
-                                fputc(*cursor++, file);
-                            }
-                        } else {
-                            // Default format: try to detect type from variable name
-                            // For array access like m[r][c], assume integer
-                            // For simple variables, we'd need symbol table - use %d as default for now
-                            fprintf(file, "%%d"); // Default to integer (most common case)
-                        }
-                        if (*cursor == '}') cursor++;
-                    } else {
-                        // Escape special characters for printf
-                        if (*cursor == '%') {
-                            fprintf(file, "%%");
-                        } else if (*cursor == '"') {
-                            fprintf(file, "\\\"");
-                        } else if (*cursor == '\\') {
-                            fprintf(file, "\\\\");
-                        } else {
-                            fputc(*cursor, file);
-                        }
-                        cursor++;
-                    }
-                }
-                fprintf(file, "\"");
-                
-                // Extract and pass variable values as arguments
-                // For now, we'll generate a simplified version
-                // In practice, we'd parse the format string and extract all variables
-                cursor = fmt_str;
-                while (*cursor != '\0') {
-                    if (cursor[0] == '$' && cursor[1] == '{') {
-                        cursor += 2;
-                        char var_name[256] = {0};
-                        int idx = 0;
-                        while (*cursor != '\0' && *cursor != '}' && *cursor != ':' && idx < 255) {
-                            var_name[idx++] = *cursor++;
-                        }
-                        if (*cursor == ':') {
-                            while (*cursor != '\0' && *cursor != '}') cursor++;
-                        }
-                        if (*cursor == '}') cursor++;
-                        
-                        // Generate code to pass the variable value
-                        // For now, we'll need to evaluate var_name - this is complex
-                        // For simplicity, assume it's a direct variable reference
-                        fprintf(file, ", %s", var_name);
-                    } else {
-                        cursor++;
-                    }
-                }
-                
-                fprintf(file, ")");
-            } else {
-                // Simple string concatenation without interpolation
-                // Check if right is formatar_texto (returns SDS) or if left is SDS variable
-                int right_is_formatar = (right && right->type == NODE_FUNC_CALL && 
-                                         right->name && strcmp(right->name, "formatar_texto") == 0);
-                int left_is_sds_var = (left && left->type == NODE_VAR_REF);
-                
-                if (right_is_formatar || left_is_sds_var) {
-                    // Use sdscatsds when dealing with SDS strings
-                    fprintf(file, "sdscatsds(");
-                    if (left) {
-                        if (left->type == NODE_LITERAL_STRING) {
-                            fprintf(file, "sdsnew(");
-                            codegen(left, file);
-                            fprintf(file, ")");
-                        } else {
-                            codegen(left, file);
-                        }
-                    } else {
-                        fprintf(file, "sdsempty()");
-                    }
-                    fprintf(file, ", ");
-                    if (right) {
-                        if (right->type == NODE_LITERAL_STRING) {
-                            fprintf(file, "sdsnew(");
-                            codegen(right, file);
-                            fprintf(file, ")");
-                        } else {
-                            codegen(right, file);
-                        }
-                    }
-                    fprintf(file, ")");
-                } else {
-                    // Use sdscat for C string concatenation
-                    fprintf(file, "sdscat(");
-                    if (left) {
-                        if (left->type == NODE_LITERAL_STRING) {
-                            fprintf(file, "sdsnew(");
-                            codegen(left, file);
-                            fprintf(file, ")");
-                        } else {
-                            codegen(left, file);
-                        }
-                    } else {
-                        fprintf(file, "sdsempty()");
-                    }
-                    fprintf(file, ", ");
-                    if (right) {
-                        if (right->type == NODE_LITERAL_STRING) {
-                            codegen(right, file);
-                        } else {
-                            codegen(right, file);
-                        }
-                    }
-                    fprintf(file, ")");
-                }
-            }
-        } else {
-            // Regular arithmetic operation
-            fprintf(file, "(");
-            if (arrlen(node->children) > 0) {
-                codegen(node->children[0], file);
-            }
-            fprintf(file, " %s ", bin_op);
-            if (arrlen(node->children) > 1) {
-                codegen(node->children[1], file);
-            }
-            fprintf(file, ")");
+        fprintf(file, " %s ", bin_op);
+        if (arrlen(node->children) > 1) {
+            codegen(node->children[1], file);
         }
+        fprintf(file, ")");
         break;
 
     case NODE_INFINITO:
