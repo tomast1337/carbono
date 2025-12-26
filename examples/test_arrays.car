@@ -1,0 +1,30 @@
+programa "MatrixTest" {
+    // 1. Declare a 3x3 Identity Matrix
+    var m: [[inteiro32]] = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+    ];
+
+    escreval("Matrix loaded. Rows: ${m.len}");
+
+    // 2. Iterate Rows
+    cada (r:inteiro32 : 0 .. m.len) {
+        
+        // 3. Iterate Columns (using inner length);
+        var row: [inteiro32] = m[r];
+        var line_str: texto = "";
+        
+        cada (c : 0 .. row.len) {
+            line_str = line_str + formatar_texto("${m[r][c]} ");
+        }
+        escreval(line_str);
+    }
+
+    // 4. Dynamic Modification
+    escreval("Adding 4th row...");
+    m.push([9, 9, 9]);
+    
+    escreval("New Row Count: ${m.len}");
+    escreval("Value at [3][0]: ${m[3][0]}");
+}

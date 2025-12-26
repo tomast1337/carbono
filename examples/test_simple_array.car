@@ -1,0 +1,7 @@
+programa "SimpleArray" {
+    var arr: [inteiro32] = [1, 2, 3];
+    escreval("Array length: ${arr.len}");
+    arr.push(4);
+    escreval("New length: ${arr.len}");
+}
+
