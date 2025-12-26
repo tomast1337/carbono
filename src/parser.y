@@ -21,7 +21,7 @@ ASTNode* root_node = NULL;
 %token <integer> TOKEN_LIT_INT
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
-%token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
+%token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 
 /* Types for non-terminals */
 %type <node> program block statements statement var_decl if_stmt expr
@@ -76,12 +76,97 @@ var_decl:
     ;
 
 if_stmt:
-    /* Matches: se ( x > 5 ) { ... } or se ( x > pi ) { ... } */
+    /* Matches: se ( x > 5 ) { ... } or se ( x < pi ) { ... } */
     TOKEN_SE '(' TOKEN_ID '>' expr ')' block {
         $$ = ast_new(NODE_IF);
         $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">"); // Operator
         ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // Block
+        ast_add_child($$, $7);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '<' expr ')' block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<"); // Operator
+        ast_add_child($$, $5);      // Right-hand expression
+        ast_add_child($$, $7);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '>' '=' expr ')' block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '<' '=' expr ')' block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '=' '=' expr ')' block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("=="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '!' '=' expr ')' block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("!="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+    }
+    | TOKEN_SE '(' TOKEN_ID '>' expr ')' block TOKEN_SENAO block {
+        /* Matches: se ( x > 5 ) { ... } senao { ... } */
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">"); // Operator
+        ast_add_child($$, $5);      // Right-hand expression
+        ast_add_child($$, $7);      // If block
+        ast_add_child($$, $9);      // Else block
+    }
+    | TOKEN_SE '(' TOKEN_ID '<' expr ')' block TOKEN_SENAO block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<"); // Operator
+        ast_add_child($$, $5);      // Right-hand expression
+        ast_add_child($$, $7);      // If block
+        ast_add_child($$, $9);      // Else block
+    }
+    | TOKEN_SE '(' TOKEN_ID '>' '=' expr ')' block TOKEN_SENAO block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+        ast_add_child($$, $10);     // Else block
+    }
+    | TOKEN_SE '(' TOKEN_ID '<' '=' expr ')' block TOKEN_SENAO block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+        ast_add_child($$, $10);     // Else block
+    }
+    | TOKEN_SE '(' TOKEN_ID '=' '=' expr ')' block TOKEN_SENAO block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("=="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+        ast_add_child($$, $10);     // Else block
+    }
+    | TOKEN_SE '(' TOKEN_ID '!' '=' expr ')' block TOKEN_SENAO block {
+        $$ = ast_new(NODE_IF);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("!="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // If block
+        ast_add_child($$, $10);     // Else block
     }
     ;
 

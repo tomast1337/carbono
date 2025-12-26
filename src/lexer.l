@@ -45,6 +45,7 @@ double parse_float(const char* txt) {
 "programa"  { return TOKEN_PROGRAMA; }
 "var"       { return TOKEN_VAR; }
 "se"        { return TOKEN_SE; }
+"senao"     { return TOKEN_SENAO; }
 "externo"   { return TOKEN_EXTERNO; }
 "funcao"    { return TOKEN_FUNCAO; }
 
