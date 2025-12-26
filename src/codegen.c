@@ -110,17 +110,25 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_IF:
-        // se ( x > expr ) { ... }
+        // se ( x op expr ) { ... } [senao { ... }]
         // node->name is the left-hand variable
+        // node->data_type is the operator (>, <, >=, <=, ==, !=)
         // node->children[0] is the right-hand expression
-        // node->children[1] is the block
-        fprintf(file, "    if (%s > ", node->name);
+        // node->children[1] is the if block
+        // node->children[2] is the else block (if present)
+        const char* op = node->data_type ? node->data_type : ">";
+        fprintf(file, "    if (%s %s ", node->name, op);
         if (arrlen(node->children) > 0) {
             codegen(node->children[0], file); // Right-hand expression
         }
         fprintf(file, ") ");
         if (arrlen(node->children) > 1) {
-            codegen(node->children[1], file); // The block
+            codegen(node->children[1], file); // The if block
+        }
+        if (arrlen(node->children) > 2) {
+            // There's an else block
+            fprintf(file, " else ");
+            codegen(node->children[2], file); // The else block
         }
         fprintf(file, "\n");
         break;
