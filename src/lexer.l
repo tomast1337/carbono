@@ -46,6 +46,7 @@ double parse_float(const char* txt) {
 "var"       { return TOKEN_VAR; }
 "se"        { return TOKEN_SE; }
 "senao"     { return TOKEN_SENAO; }
+"enquanto"  { return TOKEN_ENQUANTO; }
 "cada"      { return TOKEN_CADA; }
 "infinito"  { return TOKEN_INFINITO; }
 "parar"     { return TOKEN_PARAR; }

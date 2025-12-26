@@ -109,6 +109,15 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, ";\n");
         break;
 
+    case NODE_ASSIGN:
+        // x = expr -> x = expr;
+        fprintf(file, "    %s = ", node->name);
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Expression value
+        }
+        fprintf(file, ";\n");
+        break;
+
     case NODE_IF:
         // se ( x op expr ) { ... } [senao { ... }]
         // node->name is the left-hand variable
@@ -129,6 +138,24 @@ void codegen(ASTNode *node, FILE *file)
             // There's an else block
             fprintf(file, " else ");
             codegen(node->children[2], file); // The else block
+        }
+        fprintf(file, "\n");
+        break;
+
+    case NODE_ENQUANTO:
+        // enquanto ( x op expr ) { ... }
+        // node->name is the left-hand variable
+        // node->data_type is the operator (>, <, >=, <=, ==, !=)
+        // node->children[0] is the right-hand expression
+        // node->children[1] is the block
+        const char* op_while = node->data_type ? node->data_type : ">";
+        fprintf(file, "    while (%s %s ", node->name, op_while);
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Right-hand expression
+        }
+        fprintf(file, ") ");
+        if (arrlen(node->children) > 1) {
+            codegen(node->children[1], file); // The block
         }
         fprintf(file, "\n");
         break;
@@ -171,6 +198,22 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_VAR_REF:
         fprintf(file, "%s", node->name);
+        break;
+
+    case NODE_BINARY_OP:
+        // Binary operations: +, -, *, /
+        // node->data_type contains the operator
+        // node->children[0] is left operand
+        // node->children[1] is right operand
+        fprintf(file, "(");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file);
+        }
+        fprintf(file, " %s ", node->data_type ? node->data_type : "+");
+        if (arrlen(node->children) > 1) {
+            codegen(node->children[1], file);
+        }
+        fprintf(file, ")");
         break;
 
     case NODE_INFINITO:

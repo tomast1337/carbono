@@ -19,6 +19,7 @@ typedef enum {
     NODE_BINARY_OP, // For x + y, x - y
     NODE_UNARY_OP, // For -x
     NODE_CADA, // cada (i : 0..10) { ... }
+    NODE_ENQUANTO, // enquanto (x > 0) { ... }
     NODE_INFINITO, // infinito { ... }
     NODE_BREAK, // parar;
     NODE_CONTINUE // continuar;

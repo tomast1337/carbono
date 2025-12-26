@@ -22,10 +22,10 @@ ASTNode* root_node = NULL;
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
-%token TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT
+%token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl if_stmt expr cada_stmt infinito_stmt flow_stmt
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt
 
 %%
 
@@ -48,7 +48,12 @@ statements:
         ast_add_child($$, $2);
     }
     | statements if_stmt {
-        /* Control flow statements (if/while) don't need semicolons */
+        /* Control flow statements (if) don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements enquanto_stmt {
+        /* While loop statements don't need semicolons */
         $$ = $1;
         ast_add_child($$, $2);
     }
@@ -74,6 +79,7 @@ statements:
 
 statement:
     var_decl
+    | assign_stmt
     | TOKEN_ID '(' expr ')' { 
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
@@ -88,6 +94,14 @@ var_decl:
         $$->name = sdsnew($2);
         $$->data_type = sdsnew($4);
         ast_add_child($$, $6);
+    }
+    ;
+
+assign_stmt:
+    TOKEN_ID '=' expr {
+        $$ = ast_new(NODE_ASSIGN);
+        $$->name = sdsnew($1);      // Variable name
+        ast_add_child($$, $3);      // Expression value
     }
     ;
 
@@ -186,7 +200,89 @@ if_stmt:
     }
     ;
 
+enquanto_stmt:
+    /* Matches: enquanto ( x > 5 ) { ... } */
+    TOKEN_ENQUANTO '(' TOKEN_ID '>' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">"); // Operator
+        ast_add_child($$, $5);      // Right-hand expression
+        ast_add_child($$, $7);      // Block
+    }
+    | TOKEN_ENQUANTO '(' TOKEN_ID '<' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<"); // Operator
+        ast_add_child($$, $5);      // Right-hand expression
+        ast_add_child($$, $7);      // Block
+    }
+    | TOKEN_ENQUANTO '(' TOKEN_ID '>' '=' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew(">="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // Block
+    }
+    | TOKEN_ENQUANTO '(' TOKEN_ID '<' '=' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("<="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // Block
+    }
+    | TOKEN_ENQUANTO '(' TOKEN_ID '=' '=' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("=="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // Block
+    }
+    | TOKEN_ENQUANTO '(' TOKEN_ID '!' '=' expr ')' block {
+        $$ = ast_new(NODE_ENQUANTO);
+        $$->name = sdsnew($3);      // Variable (x)
+        $$->data_type = sdsnew("!="); // Operator
+        ast_add_child($$, $6);      // Right-hand expression
+        ast_add_child($$, $8);      // Block
+    }
+    ;
+
 expr:
+    expr '+' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("+");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | expr '-' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("-");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | term {
+        $$ = $1;
+    }
+    ;
+
+term:
+    term '*' factor {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("*");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | term '/' factor {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("/");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | factor {
+        $$ = $1;
+    }
+    ;
+
+factor:
     TOKEN_LIT_INT {
         $$ = ast_new(NODE_LITERAL_INT);
         $$->int_value = $1;
@@ -206,6 +302,9 @@ expr:
     | TOKEN_ID {
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
+    }
+    | '(' expr ')' {
+        $$ = $2;
     }
     ;
 
