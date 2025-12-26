@@ -64,6 +64,100 @@ const char *map_type(const char *type)
 // Forward declaration
 void codegen(ASTNode *node, FILE *file);
 
+// Helper to check if a string starts with a prefix
+static int starts_with(const char *str, const char *prefix) {
+    size_t prefix_len = strlen(prefix);
+    if (strlen(str) < prefix_len) return 0;
+    return strncmp(str, prefix, prefix_len) == 0;
+}
+
+// THE INTERPOLATION ENGINE
+static void codegen_string_literal(const char* raw_str, FILE* file) {
+    // raw_str comes in without quotes (already removed by lexer's clean_str)
+    const char* cursor = raw_str;
+    
+    while (*cursor != '\0') {
+        
+        // CASE A: Start of Interpolation "${"
+        if (starts_with(cursor, "${")) {
+            cursor += 2; // Skip "${"
+            
+            // buffer for variable name and options
+            char var_buffer[128] = {0};
+            char opt_buffer[64] = {0};
+            int v_idx = 0;
+            int o_idx = 0;
+            int parsing_opts = 0; // false
+            
+            // Read until '}'
+            while (*cursor != '\0' && *cursor != '}') {
+                if (*cursor == ':') {
+                    parsing_opts = 1; // Switch to reading options
+                    cursor++;
+                    continue;
+                }
+                
+                if (!parsing_opts) {
+                    if (v_idx < 127) {
+                        var_buffer[v_idx++] = *cursor;
+                    }
+                } else {
+                    if (o_idx < 63) {
+                        opt_buffer[o_idx++] = *cursor;
+                    }
+                }
+                cursor++;
+            }
+            if (*cursor == '}') cursor++; // Skip closing '}'
+            
+            // GENERATE PRINTF
+            if (parsing_opts && o_idx > 0) {
+                // User provided options: ${pi:.2f}
+                // We ensure it starts with '%' for C printf
+                if (opt_buffer[0] != '%') {
+                    fprintf(file, "    printf(\"%%%s\", %s);\n", opt_buffer, var_buffer);
+                } else {
+                    fprintf(file, "    printf(\"%s\", %s);\n", opt_buffer, var_buffer);
+                }
+            } else {
+                // No options: ${x} -> Use generic macro
+                fprintf(file, "    printf(print_any(%s), %s);\n", var_buffer, var_buffer);
+            }
+        } 
+        // CASE B: Normal Text
+        else {
+            fprintf(file, "    printf(\"");
+            // Read until next '${' or end of string
+            while (*cursor != '\0' && !starts_with(cursor, "${")) {
+                // Handle escaped chars
+                if (*cursor == '\\') {
+                    cursor++;
+                    switch (*cursor) {
+                        case 'n': fputc('\n', file); break;
+                        case 't': fputc('\t', file); break;
+                        case '\\': fputc('\\', file); break;
+                        case '"': fputc('"', file); break;
+                        default: fputc(*cursor, file); break;
+                    }
+                    if (*cursor != '\0') cursor++;
+                } else {
+                    // Escape special characters for printf
+                    if (*cursor == '%') {
+                        fputc('%', file); // Escape % as %%
+                    } else if (*cursor == '"') {
+                        fputc('\\', file);
+                        fputc('"', file);
+                    } else {
+                        fputc(*cursor, file);
+                    }
+                    cursor++;
+                }
+            }
+            fprintf(file, "\");\n");
+        }
+    }
+}
+
 void codegen_block(ASTNode *node, FILE *file)
 {
     fprintf(file, "{\n");
@@ -84,6 +178,16 @@ void codegen(ASTNode *node, FILE *file)
     case NODE_PROGRAM:
         fprintf(file, "#include <stdio.h>\n");
         fprintf(file, "#include <stdlib.h>\n\n");
+        fprintf(file, "// Auto-typing macro for printf\n");
+        fprintf(file, "#define print_any(x) _Generic((x), \\\n");
+        fprintf(file, "    int: \"%%d\", \\\n");
+        fprintf(file, "    long long: \"%%lld\", \\\n");
+        fprintf(file, "    short: \"%%hd\", \\\n");
+        fprintf(file, "    float: \"%%f\", \\\n");
+        fprintf(file, "    double: \"%%f\", \\\n");
+        fprintf(file, "    char*: \"%%s\", \\\n");
+        fprintf(file, "    char: \"%%c\", \\\n");
+        fprintf(file, "    default: \"%%d\")\n\n");
         fprintf(file, "int main() {\n");
         // Generate the body (the block inside the program)
         for (int i = 0; i < arrlen(node->children); i++)
@@ -164,12 +268,24 @@ void codegen(ASTNode *node, FILE *file)
         // Special handling for 'escreval' -> 'printf'
         if (strcmp(node->name, "escreval") == 0)
         {
-            fprintf(file, "    printf(\"%%s\\n\", ");
-            if (arrlen(node->children) > 0)
-            {
-                codegen(node->children[0], file);
+            // Check if argument is a String Literal (candidate for interpolation)
+            if (arrlen(node->children) > 0 && node->children[0]->type == NODE_LITERAL_STRING) {
+                // Use our interpolation engine
+                codegen_string_literal(node->children[0]->string_value, file);
+                fprintf(file, "    printf(\"\\n\");\n");
+            } else {
+                // Old generic fallback (vars, math, etc.)
+                fprintf(file, "    printf(print_any(");
+                if (arrlen(node->children) > 0) {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, "), ");
+                if (arrlen(node->children) > 0) {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, ");\n");
+                fprintf(file, "    printf(\"\\n\");\n");
             }
-            fprintf(file, ");\n");
         }
         else
         {
