@@ -22,7 +22,9 @@ typedef enum {
     NODE_ENQUANTO, // enquanto (x > 0) { ... }
     NODE_INFINITO, // infinito { ... }
     NODE_BREAK, // parar;
-    NODE_CONTINUE // continuar;
+    NODE_CONTINUE, // continuar;
+    NODE_INPUT_VALUE, // ler() as expression
+    NODE_INPUT_PAUSE // ler() as statement
 } NodeType;
 
 typedef struct ASTNode {

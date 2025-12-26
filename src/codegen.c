@@ -177,7 +177,8 @@ void codegen(ASTNode *node, FILE *file)
     {
     case NODE_PROGRAM:
         fprintf(file, "#include <stdio.h>\n");
-        fprintf(file, "#include <stdlib.h>\n\n");
+        fprintf(file, "#include <stdlib.h>\n");
+        fprintf(file, "#include \"sds.h\"\n\n");
         fprintf(file, "// Auto-typing macro for printf\n");
         fprintf(file, "#define print_any(x) _Generic((x), \\\n");
         fprintf(file, "    int: \"%%d\", \\\n");
@@ -188,6 +189,36 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    char*: \"%%s\", \\\n");
         fprintf(file, "    char: \"%%c\", \\\n");
         fprintf(file, "    default: \"%%d\")\n\n");
+        fprintf(file, "// Input System Runtime Helpers\n");
+        fprintf(file, "void flush_input() { \n");
+        fprintf(file, "    int c; \n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF); \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "int read_int() { \n");
+        fprintf(file, "    int x; scanf(\"%%d\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "long long read_long() { \n");
+        fprintf(file, "    long long x; scanf(\"%%lld\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "float read_float() { \n");
+        fprintf(file, "    float x; scanf(\"%%f\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "double read_double() { \n");
+        fprintf(file, "    double x; scanf(\"%%lf\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "char* read_string() {\n");
+        fprintf(file, "    sds line = sdsempty();\n");
+        fprintf(file, "    int c;\n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF) {\n");
+        fprintf(file, "        char ch = (char)c;\n");
+        fprintf(file, "        line = sdscatlen(line, &ch, 1);\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    return line;\n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "void wait_enter() {\n");
+        fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
+        fprintf(file, "    flush_input();\n");
+        fprintf(file, "}\n\n");
         fprintf(file, "int main() {\n");
         // Generate the body (the block inside the program)
         for (int i = 0; i < arrlen(node->children); i++)
@@ -208,16 +239,48 @@ void codegen(ASTNode *node, FILE *file)
         // We expect one child: the expression for the value
         if (arrlen(node->children) > 0)
         {
-            codegen(node->children[0], file);
+            ASTNode* init_node = node->children[0];
+            // Check if init value is NODE_INPUT_VALUE
+            if (init_node->type == NODE_INPUT_VALUE) {
+                const char* type = map_type(node->data_type);
+                // Map Type -> Specific Function
+                if (strcmp(type, "int") == 0) {
+                    fprintf(file, "read_int()");
+                } else if (strcmp(type, "long long") == 0) {
+                    fprintf(file, "read_long()");
+                } else if (strcmp(type, "float") == 0) {
+                    fprintf(file, "read_float()");
+                } else if (strcmp(type, "double") == 0) {
+                    fprintf(file, "read_double()");
+                } else if (strcmp(type, "char*") == 0) {
+                    fprintf(file, "read_string()");
+                } else {
+                    fprintf(file, "read_int()"); // fallback
+                }
+            } else {
+                codegen(init_node, file);
+            }
         }
         fprintf(file, ";\n");
         break;
 
     case NODE_ASSIGN:
         // x = expr -> x = expr;
+        // TODO: When Symbol Table is implemented, check if expr is NODE_INPUT_VALUE
+        // and use get_var_type(node->name) to determine the correct read function
+        // For now, assignments with ler() will need to be done at declaration time
         fprintf(file, "    %s = ", node->name);
         if (arrlen(node->children) > 0) {
-            codegen(node->children[0], file); // Expression value
+            ASTNode* value_node = node->children[0];
+            // Check if assignment value is ler()
+            if (value_node->type == NODE_INPUT_VALUE) {
+                // TODO: Use Symbol Table to lookup variable type: get_var_type(node->name)
+                // Then map to appropriate read function based on type
+                // This will be properly implemented with Symbol Table
+                fprintf(file, "read_int()"); // Temporary fallback - will be fixed with Symbol Table
+            } else {
+                codegen(value_node, file); // Expression value
+            }
         }
         fprintf(file, ";\n");
         break;
@@ -381,6 +444,16 @@ void codegen(ASTNode *node, FILE *file)
             codegen(node->children[0], file); // Block
         }
         fprintf(file, "\n");
+        break;
+
+    case NODE_INPUT_PAUSE:
+        // ler() -> wait_enter();
+        fprintf(file, "    wait_enter();\n");
+        break;
+
+    case NODE_INPUT_VALUE:
+        // This should only appear as a child of NODE_VAR_DECL
+        // Handled in NODE_VAR_DECL case
         break;
 
     default:

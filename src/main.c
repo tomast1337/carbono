@@ -36,9 +36,9 @@ int main(int argc, char** argv) {
         codegen(root_node, out);
         fclose(out);
 
-        // 3. Compile with GCC
+        // 3. Compile with GCC (link sds.c for string input)
         printf("[Carbono] Compiling Native Binary...\n");
-        system("gcc output.c -o program");
+        system("gcc output.c deps/sds.c -o program -I deps -Wall");
         
         printf("[Carbono] Done! Run with ./program\n");
     }

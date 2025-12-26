@@ -51,6 +51,7 @@ double parse_float(const char* txt) {
 "infinito"  { return TOKEN_INFINITO; }
 "parar"     { return TOKEN_PARAR; }
 "continuar" { return TOKEN_CONTINUAR; }
+"ler"       { return TOKEN_LER; }
 "externo"   { return TOKEN_EXTERNO; }
 "funcao"    { return TOKEN_FUNCAO; }
 

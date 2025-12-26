@@ -22,10 +22,10 @@ ASTNode* root_node = NULL;
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
-%token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT
+%token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt
 
 %%
 
@@ -72,6 +72,11 @@ statements:
         $$ = $1;
         ast_add_child($$, $2);
     }
+    | statements input_stmt {
+        /* Input statements need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
     | /* empty */ {
         $$ = ast_new(NODE_BLOCK);
     }
@@ -80,6 +85,7 @@ statements:
 statement:
     var_decl
     | assign_stmt
+    | input_stmt
     | TOKEN_ID '(' expr ')' { 
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
@@ -303,6 +309,10 @@ factor:
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
     }
+    | TOKEN_LER '(' ')' {
+        /* Expression: var x = ler() */
+        $$ = ast_new(NODE_INPUT_VALUE);
+    }
     | '(' expr ')' {
         $$ = $2;
     }
@@ -364,6 +374,13 @@ flow_stmt:
     }
     | TOKEN_CONTINUAR TOKEN_SEMICOLON {
         $$ = ast_new(NODE_CONTINUE);
+    }
+    ;
+
+input_stmt:
+    TOKEN_LER '(' ')' TOKEN_SEMICOLON {
+        /* Statement: ler() - system pause */
+        $$ = ast_new(NODE_INPUT_PAUSE);
     }
     ;
 
