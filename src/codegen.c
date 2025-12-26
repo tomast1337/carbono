@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "ast.h"
+#include "symtable.h"
 
 // Helper to count array brackets and extract base type
 static int count_array_depth(const char *type, const char **base_type) {
@@ -245,6 +246,9 @@ void codegen(ASTNode *node, FILE *file)
     switch (node->type)
     {
     case NODE_PROGRAM:
+        // Initialize symbol table for codegen
+        scope_enter(); // Global scope
+        
         fprintf(file, "#include <stdio.h>\n");
         fprintf(file, "#include <stdlib.h>\n");
         fprintf(file, "#include <stdarg.h>\n");
@@ -320,6 +324,9 @@ void codegen(ASTNode *node, FILE *file)
         // var x: type = val -> int x = val;
         const char* var_type = map_type(node->data_type);
         int is_texto = (strcmp(var_type, "char*") == 0);
+        
+        // Register variable in symbol table
+        scope_bind(node->name, node->data_type);
         
         if (is_texto) {
             // For texto (char*), use sds type
@@ -467,7 +474,26 @@ void codegen(ASTNode *node, FILE *file)
             if (arrlen(node->children) > 0) {
                 ASTNode* value_node = node->children[0];
                 if (value_node->type == NODE_INPUT_VALUE) {
-                    fprintf(file, "read_int()");
+                    // Use Symbol Table to lookup variable type
+                    char* var_type = scope_lookup(node->name);
+                    if (var_type) {
+                        const char* c_type = map_type(var_type);
+                        if (strcmp(c_type, "int") == 0) {
+                            fprintf(file, "read_int()");
+                        } else if (strcmp(c_type, "long long") == 0) {
+                            fprintf(file, "read_long()");
+                        } else if (strcmp(c_type, "float") == 0) {
+                            fprintf(file, "read_float()");
+                        } else if (strcmp(c_type, "double") == 0) {
+                            fprintf(file, "read_double()");
+                        } else if (strcmp(c_type, "char*") == 0) {
+                            fprintf(file, "read_string()");
+                        } else {
+                            fprintf(file, "read_int()");
+                        }
+                    } else {
+                        fprintf(file, "read_int()");
+                    }
                 } else {
                     codegen(value_node, file);
                 }
@@ -567,7 +593,77 @@ void codegen(ASTNode *node, FILE *file)
                                 fputc(*cursor++, file);
                             }
                         } else {
-                            fprintf(file, "%%d"); // Default to integer
+                            // Try to determine type from symbol table
+                            // We need to extract the expression and find the base variable
+                            // Go back to start of expression
+                            const char* expr_start = cursor - 2; // Back to "${"
+                            char var_expr[256] = {0};
+                            int expr_idx = 0;
+                            const char* temp_cursor = cursor;
+                            while (*temp_cursor != '\0' && *temp_cursor != '}' && *temp_cursor != ':' && expr_idx < 255) {
+                                var_expr[expr_idx++] = *temp_cursor++;
+                            }
+                            
+                            // Extract base variable name (everything before first '[')
+                            char base_var[128] = {0};
+                            int base_idx = 0;
+                            for (int i = 0; i < expr_idx && var_expr[i] != '[' && base_idx < 127; i++) {
+                                base_var[base_idx++] = var_expr[i];
+                            }
+                            
+                            // Count array accesses in expression
+                            int array_accesses = 0;
+                            for (int i = 0; i < expr_idx; i++) {
+                                if (var_expr[i] == '[') array_accesses++;
+                            }
+                            
+                            // Look up base variable type in symbol table
+                            char* var_type = scope_lookup(base_var);
+                            if (var_type && array_accesses > 0) {
+                                // Calculate resulting type after array accesses
+                                int original_depth = get_array_depth(var_type);
+                                int remaining_depth = original_depth - array_accesses;
+                                
+                                if (remaining_depth <= 0) {
+                                    // We've accessed all array dimensions, get base type
+                                    char* base_type = get_base_type(var_type);
+                                    if (base_type) {
+                                        const char* c_type = map_type(base_type);
+                                        // Map C type to printf format
+                                        if (strcmp(c_type, "int") == 0 || strcmp(c_type, "long long") == 0 || 
+                                            strcmp(c_type, "short") == 0 || strcmp(c_type, "signed char") == 0) {
+                                            fprintf(file, "%%d");
+                                        } else if (strcmp(c_type, "float") == 0 || strcmp(c_type, "double") == 0) {
+                                            fprintf(file, "%%f");
+                                        } else if (strcmp(c_type, "char*") == 0) {
+                                            fprintf(file, "%%s");
+                                        } else {
+                                            fprintf(file, "%%d"); // Default
+                                        }
+                                    } else {
+                                        fprintf(file, "%%d"); // Fallback
+                                    }
+                                } else {
+                                    // Still an array, shouldn't happen in formatar_texto, but handle it
+                                    fprintf(file, "%%d");
+                                }
+                            } else if (var_type) {
+                                // Simple variable (no array access), use its type directly
+                                const char* c_type = map_type(var_type);
+                                if (strcmp(c_type, "int") == 0 || strcmp(c_type, "long long") == 0 || 
+                                    strcmp(c_type, "short") == 0 || strcmp(c_type, "signed char") == 0) {
+                                    fprintf(file, "%%d");
+                                } else if (strcmp(c_type, "float") == 0 || strcmp(c_type, "double") == 0) {
+                                    fprintf(file, "%%f");
+                                } else if (strcmp(c_type, "char*") == 0) {
+                                    fprintf(file, "%%s");
+                                } else {
+                                    fprintf(file, "%%d");
+                                }
+                            } else {
+                                // Variable not found in symbol table, default to integer
+                                fprintf(file, "%%d");
+                            }
                         }
                         if (*cursor == '}') cursor++;
                     } else {
@@ -591,18 +687,19 @@ void codegen(ASTNode *node, FILE *file)
                 while (*cursor != '\0') {
                     if (cursor[0] == '$' && cursor[1] == '{') {
                         cursor += 2;
-                        char var_name[256] = {0};
+                        char var_expr[256] = {0};
                         int idx = 0;
                         while (*cursor != '\0' && *cursor != '}' && *cursor != ':' && idx < 255) {
-                            var_name[idx++] = *cursor++;
+                            var_expr[idx++] = *cursor++;
                         }
                         if (*cursor == ':') {
                             while (*cursor != '\0' && *cursor != '}') cursor++;
                         }
                         if (*cursor == '}') cursor++;
                         
-                        // Generate code to pass the variable value
-                        fprintf(file, ", %s", var_name);
+                        // Generate code to pass the variable/expression value
+                        // var_expr might be a simple variable or an expression like "m[r][c]"
+                        fprintf(file, ", %s", var_expr);
                     } else {
                         cursor++;
                     }

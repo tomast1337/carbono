@@ -2,6 +2,7 @@
 #include <stdlib.h> // for system()
 #include <string.h>
 #include "ast.h"
+#include "symtable.h"
 
 extern int yyparse();
 extern FILE* yyin;
@@ -49,6 +50,9 @@ int main(int argc, char** argv) {
         printf("[DEBUG] Parsing file: %s\n", filename);
         printf("[DEBUG] Lexer tokens will be shown\n");
     }
+
+    // Initialize symbol table (global scope)
+    scope_enter();
 
     yyparse();
 
