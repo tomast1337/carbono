@@ -1,0 +1,35 @@
+programa "LoopDemo" {
+    
+    // String interpolation examples
+    var nome:texto = "Carbono";
+    var pi:real32 = 3.14159r;
+    var versao:inteiro32 = 1;
+    
+    // Basic interpolation (auto-typed)
+    escreval("Ola ${nome}, versao ${versao}");
+    
+    // Formatted interpolation
+    escreval("O valor de PI formatado e: ${pi:.2f}");
+    
+    // Simple integer loop with interpolation
+    cada (i : 0..5) {
+        escreval("Contando: ${i}");
+    }
+
+    var cond:inteiro32 = 10;
+    var count:inteiro32 = 0;
+    enquanto (cond > 0) {
+        escreval("cond = ${cond}, count = ${count}");
+        count = count + 1;
+        cond = cond - 1;
+    }
+    escreval("Final count: ${count}");
+
+    // Typed float loop
+    cada (x : real32 : 0.0r .. 1.0r : 0.1r) {
+        escreval("x = ${x:.1f}");
+        se (x > 0.5) { 
+            parar; 
+        }
+    }
+}
