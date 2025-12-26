@@ -48,6 +48,8 @@ double parse_float(const char* txt) {
 "externo"   { return TOKEN_EXTERNO; }
 "funcao"    { return TOKEN_FUNCAO; }
 
+";"         { return TOKEN_SEMICOLON; }
+
 [0-9][0-9_]*\.[0-9][0-9_]*r { 
     yylval.float_val = (float)parse_float(yytext); 
     return TOKEN_LIT_FLOAT; 

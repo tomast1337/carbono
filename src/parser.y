@@ -21,7 +21,7 @@ ASTNode* root_node = NULL;
 %token <integer> TOKEN_LIT_INT
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
-%token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_EXTERNO TOKEN_FUNCAO
+%token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 
 /* Types for non-terminals */
 %type <node> program block statements statement var_decl if_stmt expr
@@ -41,7 +41,13 @@ block:
     ;
 
 statements:
-    statements statement {
+    statements statement TOKEN_SEMICOLON {
+        /* Require semicolon after statements (var_decl, function calls) */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements if_stmt {
+        /* Control flow statements (if/while) don't need semicolons */
         $$ = $1;
         ast_add_child($$, $2);
     }
@@ -52,7 +58,6 @@ statements:
 
 statement:
     var_decl
-    | if_stmt  /* <--- THIS WAS MISSING */
     | TOKEN_ID '(' expr ')' { 
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
