@@ -1,9 +1,86 @@
 programa "TesteCarbono" {
-    var x: inteiro = 10
-    var msg: texto = "Ola Carbono!"
+    // ============================================
+    // Variable Declarations - All Types
+    // ============================================
+    var x: inteiro32 = 10;
+    var y: inteiro32 = 20;
+    var pi: real32 = 3.14r;
+    var e: real64 = 2.71828;
+    var msg: texto = "Ola Carbono!";
+    var greeting: texto = "Bem-vindo";
     
+    /* 
+     * Block comment test
+     * Testing multi-line comments
+     */
+    
+    // ============================================
+    // If Statements - All Comparison Operators
+    // ============================================
+    
+    // Greater than (>)
     se (x > 5) {
-        // This is a function call stub
-        escreval(msg)
+        escreval("x é maior que 5");
+    }
+    
+    // Less than (<)
+    se (pi < e) {
+        escreval("π é menor que e");
+    } senao {
+        escreval("π não é menor que e");
+    }
+    
+    // Greater than or equal (>=)
+    se (x >= 10) {
+        escreval("x é maior ou igual a 10");
+    }
+    
+    // Less than or equal (<=)
+    se (y <= 20) {
+        escreval("y é menor ou igual a 20");
+    }
+    
+    // Equal (==)
+    se (x == 10) {
+        escreval("x é igual a 10");
+    } senao {
+        escreval("x não é igual a 10");
+    }
+    
+    // Not equal (!=)
+    se (x != y) {
+        escreval("x é diferente de y");
+    }
+    
+    // ============================================
+    // Variable Comparisons
+    // ============================================
+    se (x > y) {
+        escreval("x é maior que y");
+    } senao {
+        escreval("x não é maior que y");
+    }
+    
+    se (pi > e) {
+        escreval("π é maior que e");
+    }
+    
+    // ============================================
+    // Function Calls with Different Arguments
+    // ============================================
+    escreval(msg);
+    escreval("String literal direto");
+    escreval(greeting);
+    
+    // ============================================
+    // Complex Nested Structures
+    // ============================================
+    se (x == 10) {
+        escreval("Primeiro if");
+        se (y > 15) {
+            escreval("Segundo if aninhado");
+        }
+    } senao {
+        escreval("Primeiro else");
     }
 }
