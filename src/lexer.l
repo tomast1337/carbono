@@ -46,10 +46,15 @@ double parse_float(const char* txt) {
 "var"       { return TOKEN_VAR; }
 "se"        { return TOKEN_SE; }
 "senao"     { return TOKEN_SENAO; }
+"cada"      { return TOKEN_CADA; }
+"infinito"  { return TOKEN_INFINITO; }
+"parar"     { return TOKEN_PARAR; }
+"continuar" { return TOKEN_CONTINUAR; }
 "externo"   { return TOKEN_EXTERNO; }
 "funcao"    { return TOKEN_FUNCAO; }
 
 ";"         { return TOKEN_SEMICOLON; }
+\.\.        { return TOKEN_DOTDOT; } /* Range Operator 0..10 */
 
 [0-9][0-9_]*\.[0-9][0-9_]*r { 
     yylval.float_val = (float)parse_float(yytext); 

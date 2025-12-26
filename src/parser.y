@@ -22,9 +22,10 @@ ASTNode* root_node = NULL;
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
+%token TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl if_stmt expr
+%type <node> program block statements statement var_decl if_stmt expr cada_stmt infinito_stmt flow_stmt
 
 %%
 
@@ -48,6 +49,21 @@ statements:
     }
     | statements if_stmt {
         /* Control flow statements (if/while) don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements cada_stmt {
+        /* Loop statements don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements infinito_stmt {
+        /* Infinite loop statements don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements flow_stmt {
+        /* Flow control statements (break/continue) need semicolons */
         $$ = $1;
         ast_add_child($$, $2);
     }
@@ -190,6 +206,65 @@ expr:
     | TOKEN_ID {
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
+    }
+    ;
+
+cada_stmt:
+    /* 1. Basic: cada (i : 0..10) */
+    TOKEN_CADA '(' TOKEN_ID ':' expr TOKEN_DOTDOT expr ')' block {
+        $$ = ast_new(NODE_CADA);
+        $$->cada_var = sdsnew($3);
+        $$->cada_type = sdsnew("inteiro32"); // Default type
+        $$->start = $5;
+        $$->end = $7;
+        $$->step = NULL;
+        ast_add_child($$, $9); // Block
+    }
+    /* 2. Basic with step: cada (i : 0..10 : 2) */
+    | TOKEN_CADA '(' TOKEN_ID ':' expr TOKEN_DOTDOT expr ':' expr ')' block {
+        $$ = ast_new(NODE_CADA);
+        $$->cada_var = sdsnew($3);
+        $$->cada_type = sdsnew("inteiro32"); // Default type
+        $$->start = $5;
+        $$->end = $7;
+        $$->step = $9; // Step expression
+        ast_add_child($$, $11); // Block
+    }
+    /* 3. Typed: cada (i : real32 : 0.0 .. 10.0) */
+    | TOKEN_CADA '(' TOKEN_ID ':' TOKEN_ID ':' expr TOKEN_DOTDOT expr ')' block {
+        $$ = ast_new(NODE_CADA);
+        $$->cada_var = sdsnew($3);
+        $$->cada_type = sdsnew($5); // Explicit type
+        $$->start = $7;
+        $$->end = $9;
+        $$->step = NULL;
+        ast_add_child($$, $11); // Block
+    }
+    /* 4. Typed with step: cada (i : real32 : 0.0 .. 10.0 : 0.1) */
+    | TOKEN_CADA '(' TOKEN_ID ':' TOKEN_ID ':' expr TOKEN_DOTDOT expr ':' expr ')' block {
+        $$ = ast_new(NODE_CADA);
+        $$->cada_var = sdsnew($3);
+        $$->cada_type = sdsnew($5); // Explicit type
+        $$->start = $7;
+        $$->end = $9;
+        $$->step = $11; // Step expression
+        ast_add_child($$, $13); // Block
+    }
+    ;
+
+infinito_stmt:
+    TOKEN_INFINITO block {
+        $$ = ast_new(NODE_INFINITO);
+        ast_add_child($$, $2);
+    }
+    ;
+
+flow_stmt:
+    TOKEN_PARAR TOKEN_SEMICOLON {
+        $$ = ast_new(NODE_BREAK);
+    }
+    | TOKEN_CONTINUAR TOKEN_SEMICOLON {
+        $$ = ast_new(NODE_CONTINUE);
     }
     ;
 

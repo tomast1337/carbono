@@ -173,6 +173,57 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "%s", node->name);
         break;
 
+    case NODE_INFINITO:
+        fprintf(file, "    while(1) ");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Block
+        }
+        fprintf(file, "\n");
+        break;
+
+    case NODE_BREAK:
+        fprintf(file, "    break;\n");
+        break;
+
+    case NODE_CONTINUE:
+        fprintf(file, "    continue;\n");
+        break;
+
+    case NODE_CADA:
+        // "cada (i : 0..10)" -> "for (int i = 0; i < 10; i += 1)"
+        // 1. Resolve Type (int, double, etc.)
+        const char* c_type = map_type(node->cada_type ? node->cada_type : "inteiro32");
+        
+        fprintf(file, "    for (%s %s = ", c_type, node->cada_var ? node->cada_var : "i");
+        if (node->start) {
+            codegen(node->start, file);
+        } else {
+            fprintf(file, "0");
+        }
+        
+        // 2. Condition (Use < for exclusive range)
+        fprintf(file, "; %s < ", node->cada_var ? node->cada_var : "i");
+        if (node->end) {
+            codegen(node->end, file);
+        } else {
+            fprintf(file, "0");
+        }
+        
+        // 3. Increment
+        fprintf(file, "; %s += ", node->cada_var ? node->cada_var : "i");
+        if (node->step) {
+            codegen(node->step, file);
+        } else {
+            fprintf(file, "1");
+        }
+        
+        fprintf(file, ") ");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Block
+        }
+        fprintf(file, "\n");
+        break;
+
     default:
         fprintf(file, "// Unknown node type %d\n", node->type);
         break;

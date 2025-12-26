@@ -17,7 +17,11 @@ typedef enum {
     NODE_LITERAL_STRING, // "Hello"
     NODE_VAR_REF, // x
     NODE_BINARY_OP, // For x + y, x - y
-    NODE_UNARY_OP   // For -x
+    NODE_UNARY_OP, // For -x
+    NODE_CADA, // cada (i : 0..10) { ... }
+    NODE_INFINITO, // infinito { ... }
+    NODE_BREAK, // parar;
+    NODE_CONTINUE // continuar;
 } NodeType;
 
 typedef struct ASTNode {
@@ -26,9 +30,16 @@ typedef struct ASTNode {
     sds name;
     sds data_type;
     sds string_value;
+    // Numerical values
     int int_value;
     double double_value;
-    float float_value;
+    float float_value; 
+    // Specific to 'cada' loop
+    sds cada_var;      // Loop variable name ("i")
+    sds cada_type;     // Optional Type ("inteiro32" or "real32")
+    struct ASTNode* start; // Start expression
+    struct ASTNode* end;   // End expression
+    struct ASTNode* step;  // Step expression (can be NULL, defaults to 1)
 } ASTNode;
 
 // Prototypes only!
