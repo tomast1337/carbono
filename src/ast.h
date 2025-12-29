@@ -27,7 +27,9 @@ typedef enum {
     NODE_INPUT_PAUSE, // ler() as statement
     NODE_ARRAY_LITERAL, // [1, 2, 3]
     NODE_ARRAY_ACCESS, // arr[0] or arr[0][1]
-    NODE_METHOD_CALL // arr.len, arr.push(x)
+    NODE_METHOD_CALL, // arr.len, arr.push(x)
+    NODE_STRUCT_DEF,   // estrutura Player { ... }
+    NODE_PROP_ACCESS   // p.x
 } NodeType;
 
 typedef struct ASTNode {

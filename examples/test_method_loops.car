@@ -1,0 +1,17 @@
+programa "MethodCallLoops" {
+    var items: [inteiro32] = [];
+    
+    // Build array in a loop
+    cada (i: 0..5) {
+        items.push(i * 10);
+    }
+    
+    escreval("Array built with ${items.len} elements");
+    
+    // Print all elements - get length first
+    var count: inteiro32 = items.len;
+    cada (i: 0..count) {
+        escreval("Item ${i}: ${items[i]}");
+    }
+}
+

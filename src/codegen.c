@@ -3,6 +3,8 @@
 #include "ast.h"
 #include "symtable.h"
 
+extern StructRegistryEntry *type_registry;
+
 // Helper to count array brackets and extract base type
 static int count_array_depth(const char *type, const char **base_type) {
     int depth = 0;
@@ -102,6 +104,15 @@ const char *map_type(const char *type)
     for (int i = 0; map[i].src != NULL; i++)
         if (strcmp(type, map[i].src) == 0)
             return map[i].dest;
+
+    // Check if it's a registered struct type
+    if (type_registry) {
+        FieldEntry *fields = shget(type_registry, type);
+        if (fields != NULL) {
+            // It's a struct type, return it as-is (struct types in C are just their names)
+            return type;
+        }
+    }
 
     return "void"; // fallback
 }
@@ -310,7 +321,7 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_VAR_DECL:
-        // var x: type = val -> int x = val;
+        // var x: type = val -> int x = val; or var x: type -> int x;
         const char* var_type = map_type(node->data_type);
         int is_texto = (strcmp(var_type, "char*") == 0);
         
@@ -319,9 +330,18 @@ void codegen(ASTNode *node, FILE *file)
         
         if (is_texto) {
             // For texto (char*), use sds type
-            fprintf(file, "    sds %s = ", node->name);
+            fprintf(file, "    sds %s", node->name);
         } else {
-            fprintf(file, "    %s %s = ", var_type, node->name);
+            fprintf(file, "    %s %s", var_type, node->name);
+        }
+        
+        // Check if there's an initializer
+        if (arrlen(node->children) > 0) {
+            fprintf(file, " = ");
+        } else {
+            // No initializer, just declare the variable
+            fprintf(file, ";\n");
+            return;
         }
         
         // We expect one child: the expression for the value
@@ -423,37 +443,54 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_ASSIGN:
-        // x = expr -> x = expr;
-        // For texto (sds) variables, we need to free the old value after evaluating the new one
+        // x = expr or p.x = expr
         fprintf(file, "    ");
         
-        // Regular assignment
-        fprintf(file, "%s = ", node->name);
-        if (arrlen(node->children) > 0) {
-            ASTNode* value_node = node->children[0];
-            if (value_node->type == NODE_INPUT_VALUE) {
-                // Use Symbol Table to lookup variable type
-                char* var_type = scope_lookup(node->name);
-                if (var_type) {
-                    const char* c_type = map_type(var_type);
-                    if (strcmp(c_type, "int") == 0) {
-                        fprintf(file, "read_int()");
-                    } else if (strcmp(c_type, "long long") == 0) {
-                        fprintf(file, "read_long()");
-                    } else if (strcmp(c_type, "float") == 0) {
-                        fprintf(file, "read_float()");
-                    } else if (strcmp(c_type, "double") == 0) {
-                        fprintf(file, "read_double()");
-                    } else if (strcmp(c_type, "char*") == 0) {
-                        fprintf(file, "read_string()");
+        // Check if this is a property access assignment
+        if (arrlen(node->children) > 0 && node->children[0]->type == NODE_PROP_ACCESS) {
+            // Property access assignment: p.x = expr
+            ASTNode* prop = node->children[0];
+            codegen(prop, file);
+            fprintf(file, " = ");
+            // Value is in children[1] (children[0] is the property access)
+            if (arrlen(node->children) > 1) {
+                ASTNode* value_node = node->children[1];
+                if (value_node->type == NODE_INPUT_VALUE) {
+                    // For property access, we can't easily determine type, use default
+                    fprintf(file, "read_int()");
+                } else {
+                    codegen(value_node, file);
+                }
+            }
+        } else {
+            // Regular variable assignment: x = expr
+            fprintf(file, "%s = ", node->name);
+            if (arrlen(node->children) > 0) {
+                ASTNode* value_node = node->children[0];
+                if (value_node->type == NODE_INPUT_VALUE) {
+                    // Use Symbol Table to lookup variable type
+                    char* var_type = scope_lookup(node->name);
+                    if (var_type) {
+                        const char* c_type = map_type(var_type);
+                        if (strcmp(c_type, "int") == 0) {
+                            fprintf(file, "read_int()");
+                        } else if (strcmp(c_type, "long long") == 0) {
+                            fprintf(file, "read_long()");
+                        } else if (strcmp(c_type, "float") == 0) {
+                            fprintf(file, "read_float()");
+                        } else if (strcmp(c_type, "double") == 0) {
+                            fprintf(file, "read_double()");
+                        } else if (strcmp(c_type, "char*") == 0) {
+                            fprintf(file, "read_string()");
+                        } else {
+                            fprintf(file, "read_int()");
+                        }
                     } else {
                         fprintf(file, "read_int()");
                     }
                 } else {
-                    fprintf(file, "read_int()");
+                    codegen(value_node, file);
                 }
-            } else {
-                codegen(value_node, file);
             }
         }
         fprintf(file, ";\n");
@@ -679,6 +716,54 @@ void codegen(ASTNode *node, FILE *file)
             fprintf(file, "[");
             codegen(node->children[1], file); // Index
             fprintf(file, "]");
+        }
+        break;
+
+    case NODE_STRUCT_DEF:
+        // estrutura Player { ... } -> typedef struct { ... } Player;
+        fprintf(file, "typedef struct {\n");
+        if (arrlen(node->children) > 0) {
+            for (int i = 0; i < arrlen(node->children); i++) {
+                ASTNode* field = node->children[i];
+                if (field && field->name && field->data_type) {
+                    fprintf(file, "    %s %s;\n", map_type(field->data_type), field->name);
+                }
+            }
+        }
+        fprintf(file, "} %s;\n\n", node->name);
+        break;
+
+    case NODE_PROP_ACCESS:
+        // p.x -> p.x (or self->x if object is "self")
+        // Also handle array method calls that were parsed as property access
+        if (arrlen(node->children) > 0) {
+            ASTNode* obj = node->children[0];
+            
+            // Check if this is actually an array method call (arr.len, arr.push, arr.pop)
+            // by checking if the property name is a known array method
+            const char* prop_name = node->data_type ? node->data_type : "";
+            if (strcmp(prop_name, "len") == 0 || strcmp(prop_name, "push") == 0 || strcmp(prop_name, "pop") == 0) {
+                // This is likely an array method call, treat it as such
+                if (strcmp(prop_name, "len") == 0) {
+                    fprintf(file, "arrlen(");
+                    codegen(obj, file);
+                    fprintf(file, ")");
+                } else {
+                    // push/pop without arguments - this shouldn't happen for push, but handle it
+                    fprintf(file, "arrpop(");
+                    codegen(obj, file);
+                    fprintf(file, ")");
+                }
+            } else {
+                // Regular property access
+                codegen(obj, file);
+                // Handle pointer access for 'self', otherwise dot
+                if (obj->type == NODE_VAR_REF && obj->name && strcmp(obj->name, "self") == 0) {
+                    fprintf(file, "->%s", node->data_type);
+                } else {
+                    fprintf(file, ".%s", node->data_type);
+                }
+            }
         }
         break;
 

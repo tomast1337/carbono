@@ -1,0 +1,18 @@
+programa "MethodCallStrings" {
+    // Array of strings
+    var words: [texto] = ["hello", "world"];
+    
+    escreval("Words count: ${words.len}");
+    
+    // Add more words
+    words.push("from");
+    words.push("carbono");
+    
+    escreval("Total words: ${words.len}");
+    
+    // Print all words
+    cada (i: 0..words.len) {
+        escreval("Word ${i}: ${words[i]}");
+    }
+}
+

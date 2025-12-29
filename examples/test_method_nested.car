@@ -1,0 +1,20 @@
+programa "MethodCallNested" {
+    // 2D array
+    var matrix: [[inteiro32]] = [
+        [1, 2],
+        [3, 4]
+    ];
+    
+    escreval("Matrix rows: ${matrix.len}");
+    escreval("First row length: ${matrix[0].len}");
+    
+    // Add a new row
+    matrix.push([5, 6]);
+    escreval("After push, rows: ${matrix.len}");
+    
+    // Access nested array methods
+    cada (i: 0..matrix.len) {
+        escreval("Row ${i} has ${matrix[i].len} elements");
+    }
+}
+

@@ -1,6 +1,7 @@
 %{
 #include <stdio.h>
 #include "ast.h"
+#include "symtable.h"
 
 extern int yylex();
 extern int yylineno;
@@ -23,13 +24,16 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
+%token TOKEN_ESTRUTURA
 
 %left '+' '-'
 %left '*' '/'
 %right '.'
+%nonassoc PROP_ACCESS
+%nonassoc METHOD_CALL
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue
 
 %%
 
@@ -81,6 +85,11 @@ statements:
         $$ = $1;
         ast_add_child($$, $2);
     }
+    | statements struct_def {
+        /* Struct definitions don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
     | /* empty */ {
         $$ = ast_new(NODE_BLOCK);
     }
@@ -94,6 +103,7 @@ statement:
         /* Method call as statement: arr.len; or arr.push(x); */
         $$ = $1;
     }
+    | struct_def
     | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
@@ -108,6 +118,44 @@ var_decl:
         $$->name = sdsnew($2);
         $$->data_type = $4->string_value ? sdsnew($4->string_value) : sdsnew("void");
         ast_add_child($$, $6);
+    }
+    | TOKEN_VAR TOKEN_ID ':' type_def {
+        /* Uninitialized variable declaration: var p: Player */
+        $$ = ast_new(NODE_VAR_DECL);
+        $$->name = sdsnew($2);
+        $$->data_type = $4->string_value ? sdsnew($4->string_value) : sdsnew("void");
+    }
+    ;
+
+struct_def:
+    TOKEN_ESTRUTURA TOKEN_ID '{' field_list '}' {
+        $$ = ast_new(NODE_STRUCT_DEF);
+        $$->name = sdsnew($2);
+        register_struct($2); // SymTable
+        // Add fields as children
+        if ($4 && arrlen($4->children) > 0) {
+            for(int i=0; i<arrlen($4->children); i++) {
+                ASTNode* field = $4->children[i];
+                ast_add_child($$, field);
+                register_field($2, field->name, field->data_type); // SymTable
+            }
+        }
+    }
+    ;
+
+field_list:
+    field_list field_decl {
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | /* empty */ { $$ = ast_new(NODE_BLOCK); }
+    ;
+
+field_decl:
+    TOKEN_ID ':' type_def {
+        $$ = ast_new(NODE_VAR_DECL);
+        $$->name = sdsnew($1);
+        $$->data_type = $3->string_value ? sdsnew($3->string_value) : sdsnew("void");
     }
     ;
 
@@ -126,10 +174,27 @@ type_def:
     ;
 
 assign_stmt:
-    TOKEN_ID '=' expr {
+    lvalue '=' expr {
         $$ = ast_new(NODE_ASSIGN);
-        $$->name = sdsnew($1);      // Variable name
+        // For property access, we need to store the full path
+        if ($1->type == NODE_PROP_ACCESS) {
+            // Store property access as the lvalue
+            $$->name = NULL; // Will be generated from child
+            ast_add_child($$, $1); // The property access node
+        } else {
+            $$->name = sdsnew($1->name); // Variable name
+        }
         ast_add_child($$, $3);      // Expression value
+    }
+    ;
+
+lvalue:
+    TOKEN_ID {
+        $$ = ast_new(NODE_VAR_REF);
+        $$->name = sdsnew($1);
+    }
+    | prop_access {
+        $$ = $1;
     }
     ;
 
@@ -344,6 +409,9 @@ factor:
         ast_add_child($$, $1); // Base expression (could be another array access)
         ast_add_child($$, $3); // Index expression
     }
+    | prop_access {
+        $$ = $1;
+    }
     | method_call {
         $$ = $1;
     }
@@ -453,15 +521,26 @@ expr_list:
     }
     ;
 
+prop_access:
+    factor '.' TOKEN_ID %prec PROP_ACCESS {
+        /* Property access: p.x (without parentheses) */
+        $$ = ast_new(NODE_PROP_ACCESS);
+        if ($1->type == NODE_VAR_REF && $1->name) {
+            $$->name = sdsnew($1->name);
+        }
+        $$->data_type = sdsnew($3); // Property Name
+        ast_add_child($$, $1);      // Object
+    }
+    ;
+
 method_call:
-    factor '.' TOKEN_ID {
-        /* Method call on expression: arr.len or arr[0].len */
+    factor '.' TOKEN_ID '(' ')' {
+        /* Method call with no arguments: arr.pop() */
         $$ = ast_new(NODE_METHOD_CALL);
-        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
         if ($1->type == NODE_VAR_REF && $1->name != NULL) {
             $$->name = sdsnew($1->name);
         } else {
-            $$->name = NULL; // Will be generated from child
+            $$->name = NULL;
         }
         $$->data_type = sdsnew($3); // Method name
         ast_add_child($$, $1); // Base expression
@@ -478,6 +557,19 @@ method_call:
         $$->data_type = sdsnew($3); // Method name
         ast_add_child($$, $1); // Base expression
         ast_add_child($$, $5); // Argument
+    }
+    | factor '.' TOKEN_ID %prec METHOD_CALL {
+        /* Method call on expression: arr.len or arr[0].len (no parentheses) */
+        /* Note: This conflicts with prop_access, but we'll treat it as method_call for arrays */
+        $$ = ast_new(NODE_METHOD_CALL);
+        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
+        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
+            $$->name = sdsnew($1->name);
+        } else {
+            $$->name = NULL; // Will be generated from child
+        }
+        $$->data_type = sdsnew($3); // Method name
+        ast_add_child($$, $1); // Base expression
     }
     ;
 

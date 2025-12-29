@@ -1,0 +1,29 @@
+programa "MethodCallExpressions" {
+    var list1: [inteiro32] = [1, 2, 3];
+    var list2: [inteiro32] = [4, 5];
+    
+    // Use len in calculations
+    var total: inteiro32 = list1.len + list2.len;
+    escreval("Total elements: ${total}");
+    
+    // Use len in comparisons - need to use variables
+    var len1: inteiro32 = list1.len;
+    var len2: inteiro32 = list2.len;
+    se (len1 > len2) {
+        escreval("List1 is larger");
+    } senao {
+        escreval("List2 is larger or equal");
+    }
+    
+    // Method calls in assignments
+    var count: inteiro32 = list1.len;
+    escreval("Count: ${count}");
+    
+    // Build array dynamically
+    var dynamic: [inteiro32] = [];
+    cada (i: 0..10) {
+        dynamic.push(i * i);
+    }
+    escreval("Dynamic array size: ${dynamic.len}");
+}
+
