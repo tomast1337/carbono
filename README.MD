@@ -27,10 +27,10 @@ cc -o nob nob.c
 
 ## Usage
 
-Compile a `.alg` file:
+Compile a `.car` file:
 
 ```bash
-./build/carbono input.alg
+./build/carbono input.car
 
 ```
 
