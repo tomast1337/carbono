@@ -1,0 +1,37 @@
+programa "BubbleSort" {
+    // Initialize array with unsorted numbers
+    var arr: [inteiro32] = [64, 34, 25, 12, 22, 11, 90];
+    
+    escreval("Original array:");
+    var len: inteiro32 = arr.len;
+    cada (i: 0..len) {
+        escreval("  arr[${i}] = ${arr[i]}");
+    }
+    
+    // Bubble Sort Algorithm
+    var n: inteiro32 = arr.len;
+    cada (i: 0..n) {
+        var limit: inteiro32 = n - 1;
+        limit = limit - i;
+        cada (j: 0..limit) {
+            // Get array values for comparison
+            var val1: inteiro32 = arr[j];
+            var val2: inteiro32 = arr[j + 1];
+            
+            // Compare adjacent elements
+            se (val1 > val2) {
+                // Swap elements
+                var temp: inteiro32 = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+            }
+        }
+    }
+    
+    escreval("Sorted array (Bubble Sort):");
+    var final_len: inteiro32 = arr.len;
+    cada (i: 0..final_len) {
+        escreval("  arr[${i}] = ${arr[i]}");
+    }
+}
+

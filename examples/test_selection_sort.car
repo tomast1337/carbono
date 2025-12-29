@@ -1,0 +1,42 @@
+programa "SelectionSort" {
+    // Initialize array with unsorted numbers
+    var arr: [inteiro32] = [64, 34, 25, 12, 22, 11, 90];
+    
+    escreval("Original array:");
+    var len: inteiro32 = arr.len;
+    cada (i: 0..len) {
+        escreval("  arr[${i}] = ${arr[i]}");
+    }
+    
+    // Selection Sort Algorithm
+    var n: inteiro32 = arr.len;
+    var n_minus_1: inteiro32 = n - 1;
+    cada (i: 0..n_minus_1) {
+        // Find minimum element in unsorted portion
+        var min_idx: inteiro32 = i;
+        var start: inteiro32 = i + 1;
+        cada (j: start..n) {
+            var arr_j: inteiro32 = arr[j];
+            var arr_min: inteiro32 = arr[min_idx];
+            se (arr_j < arr_min) {
+                min_idx = j;
+            }
+        }
+        
+        // Swap the found minimum with first element
+        var min_not_i: inteiro32 = min_idx;
+        min_not_i = min_not_i - i;
+        se (min_not_i != 0) {
+            var temp: inteiro32 = arr[i];
+            arr[i] = arr[min_idx];
+            arr[min_idx] = temp;
+        }
+    }
+    
+    escreval("Sorted array (Selection Sort):");
+    var final_len: inteiro32 = arr.len;
+    cada (i: 0..final_len) {
+        escreval("  arr[${i}] = ${arr[i]}");
+    }
+}
+
