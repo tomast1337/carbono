@@ -176,15 +176,16 @@ type_def:
 assign_stmt:
     lvalue '=' expr {
         $$ = ast_new(NODE_ASSIGN);
-        // For property access, we need to store the full path
-        if ($1->type == NODE_PROP_ACCESS) {
-            // Store property access as the lvalue
+        // For property access or array access, we need to store the full path
+        if ($1->type == NODE_PROP_ACCESS || $1->type == NODE_ARRAY_ACCESS) {
+            // Store property/array access as the lvalue
             $$->name = NULL; // Will be generated from child
-            ast_add_child($$, $1); // The property access node
+            ast_add_child($$, $1); // The property/array access node
+            ast_add_child($$, $3); // Expression value
         } else {
             $$->name = sdsnew($1->name); // Variable name
+            ast_add_child($$, $3);      // Expression value
         }
-        ast_add_child($$, $3);      // Expression value
     }
     ;
 
@@ -193,8 +194,28 @@ lvalue:
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
     }
-    | prop_access {
-        $$ = $1;
+    | TOKEN_ID '[' expr ']' {
+        /* Array access as lvalue: arr[i] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = sdsnew($1);
+        ast_add_child($$, $3); // Index expression
+    }
+    | factor '[' expr ']' {
+        /* Nested array access as lvalue: arr[i][j] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = NULL;
+        ast_add_child($$, $1); // Base expression
+        ast_add_child($$, $3); // Index expression
+    }
+    | TOKEN_ID '.' TOKEN_ID {
+        /* Property access as lvalue: p.x (for structs only) */
+        $$ = ast_new(NODE_PROP_ACCESS);
+        $$->name = sdsnew($1);
+        $$->data_type = sdsnew($3);
+        // Create a var_ref for the object
+        ASTNode* obj = ast_new(NODE_VAR_REF);
+        obj->name = sdsnew($1);
+        ast_add_child($$, obj);
     }
     ;
 

@@ -443,7 +443,7 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_ASSIGN:
-        // x = expr or p.x = expr
+        // x = expr or p.x = expr or arr[i] = expr
         fprintf(file, "    ");
         
         // Check if this is a property access assignment
@@ -457,6 +457,20 @@ void codegen(ASTNode *node, FILE *file)
                 ASTNode* value_node = node->children[1];
                 if (value_node->type == NODE_INPUT_VALUE) {
                     // For property access, we can't easily determine type, use default
+                    fprintf(file, "read_int()");
+                } else {
+                    codegen(value_node, file);
+                }
+            }
+        } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_ARRAY_ACCESS) {
+            // Array access assignment: arr[i] = expr
+            ASTNode* arr_access = node->children[0];
+            codegen(arr_access, file);
+            fprintf(file, " = ");
+            // Value is in children[1] (children[0] is the array access)
+            if (arrlen(node->children) > 1) {
+                ASTNode* value_node = node->children[1];
+                if (value_node->type == NODE_INPUT_VALUE) {
                     fprintf(file, "read_int()");
                 } else {
                     codegen(value_node, file);
