@@ -127,6 +127,26 @@ static int starts_with(const char *str, const char *prefix) {
     return strncmp(str, prefix, prefix_len) == 0;
 }
 
+// Helper to escape a string for C string literal
+static void escape_string_for_c(const char *str, FILE *file) {
+    if (!str) {
+        fprintf(file, "\"Assertion failed\"");
+        return;
+    }
+    fprintf(file, "\"");
+    for (const char *p = str; *p != '\0'; p++) {
+        switch (*p) {
+            case '"':  fprintf(file, "\\\""); break;
+            case '\\': fprintf(file, "\\\\"); break;
+            case '\n': fprintf(file, "\\n"); break;
+            case '\t': fprintf(file, "\\t"); break;
+            case '\r': fprintf(file, "\\r"); break;
+            default:   fputc(*p, file); break;
+        }
+    }
+    fprintf(file, "\"");
+}
+
 // THE INTERPOLATION ENGINE
 static void codegen_string_literal(const char* raw_str, FILE* file) {
     // raw_str comes in without quotes (already removed by lexer's clean_str)
@@ -266,6 +286,7 @@ void codegen(ASTNode *node, FILE *file)
         
         fprintf(file, "#include <stdio.h>\n");
         fprintf(file, "#include <stdlib.h>\n");
+        fprintf(file, "#include <string.h>\n");
         fprintf(file, "#include <stdarg.h>\n");
         fprintf(file, "#include \"sds.h\"\n");
         fprintf(file, "#define STB_DS_IMPLEMENTATION\n");
@@ -674,16 +695,58 @@ void codegen(ASTNode *node, FILE *file)
             }
             fprintf(file, ")");
         } else {
-            // Regular arithmetic operations
-            fprintf(file, "(");
-            if (arrlen(node->children) > 0) {
-                codegen(node->children[0], file);
+            // Check if this is a string comparison (both operands are strings)
+            int is_string_comp = 0;
+            if ((strcmp(bin_op, "==") == 0 || strcmp(bin_op, "!=") == 0) && arrlen(node->children) >= 2) {
+                ASTNode* left = node->children[0];
+                ASTNode* right = node->children[1];
+                
+                int left_is_string = (left->type == NODE_LITERAL_STRING) ||
+                                     (left->type == NODE_VAR_REF && left->name && scope_lookup(left->name) && strcmp(map_type(scope_lookup(left->name)), "char*") == 0);
+                
+                int right_is_string = (right->type == NODE_LITERAL_STRING) ||
+                                      (right->type == NODE_VAR_REF && right->name && scope_lookup(right->name) && strcmp(map_type(scope_lookup(right->name)), "char*") == 0);
+                
+                if (left_is_string && right_is_string) {
+                    is_string_comp = 1;
+                }
             }
-            fprintf(file, " %s ", bin_op);
-            if (arrlen(node->children) > 1) {
-                codegen(node->children[1], file);
+            
+            if (is_string_comp) {
+                // String comparison: use strcmp()
+                if (strcmp(bin_op, "==") == 0) {
+                    fprintf(file, "(strcmp(");
+                    if (arrlen(node->children) > 0) {
+                        codegen(node->children[0], file);
+                    }
+                    fprintf(file, ", ");
+                    if (arrlen(node->children) > 1) {
+                        codegen(node->children[1], file);
+                    }
+                    fprintf(file, ") == 0)");
+                } else if (strcmp(bin_op, "!=") == 0) {
+                    fprintf(file, "(strcmp(");
+                    if (arrlen(node->children) > 0) {
+                        codegen(node->children[0], file);
+                    }
+                    fprintf(file, ", ");
+                    if (arrlen(node->children) > 1) {
+                        codegen(node->children[1], file);
+                    }
+                    fprintf(file, ") != 0)");
+                }
+            } else {
+                // Regular arithmetic or comparison operations
+                fprintf(file, "(");
+                if (arrlen(node->children) > 0) {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, " %s ", bin_op);
+                if (arrlen(node->children) > 1) {
+                    codegen(node->children[1], file);
+                }
+                fprintf(file, ")");
             }
-            fprintf(file, ")");
         }
         break;
 
@@ -903,6 +966,21 @@ void codegen(ASTNode *node, FILE *file)
             }
             fprintf(file, ")");
         }
+        break;
+
+    case NODE_ASSERT:
+        // garantir(x > 0, "Erro")
+        // Generates: if (!(x > 0)) { fprintf(stderr, "[PANICO] %s (Linha %d)\n", "Erro", 10); exit(1); }
+        fprintf(file, "    if (!(");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file); // Condition
+        }
+        fprintf(file, ")) {\n");
+        fprintf(file, "        fprintf(stderr, \"[PANICO] %%s (Linha %%d)\\n\", ");
+        escape_string_for_c(node->string_value, file);
+        fprintf(file, ", %d);\n", node->int_value);
+        fprintf(file, "        exit(1);\n");
+        fprintf(file, "    }\n");
         break;
 
     default:

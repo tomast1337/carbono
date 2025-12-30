@@ -31,17 +31,18 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
-%token TOKEN_ESTRUTURA
+%token TOKEN_ESTRUTURA TOKEN_ASSERT
 
 %left '+' '-'
 %left '*' '/'
+%nonassoc '>' '<'
 %right '.'
 %nonassoc PROP_ACCESS
 %nonassoc METHOD_CALL
 %left '('
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt
 
 %%
 
@@ -98,6 +99,11 @@ statements:
         $$ = $1;
         ast_add_child($$, $2);
     }
+    | statements assert_stmt {
+        /* Assert statements need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
     | /* empty */ {
         $$ = ast_new(NODE_BLOCK);
     }
@@ -112,6 +118,7 @@ statement:
     | assign_stmt
     | input_stmt
     | struct_def
+    | assert_stmt
     | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
@@ -394,6 +401,42 @@ expr:
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
+    | expr '>' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew(">");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | expr '<' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("<");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | expr '>' '=' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew(">=");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
+    | expr '<' '=' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("<=");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
+    | expr '=' '=' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("==");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
+    | expr '!' '=' term {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("!=");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
     | term {
         $$ = $1;
     }
@@ -540,6 +583,16 @@ input_stmt:
     TOKEN_LER '(' ')' TOKEN_SEMICOLON {
         /* Statement: ler() - system pause */
         $$ = ast_new(NODE_INPUT_PAUSE);
+    }
+    ;
+
+assert_stmt:
+    TOKEN_ASSERT '(' expr ',' TOKEN_LIT_STRING ')' TOKEN_SEMICOLON {
+        $$ = ast_new(NODE_ASSERT);
+        $$->string_value = sdsnew($5); // The error message
+        ast_add_child($$, $3);         // The condition expression
+        // Store line number for the panic message
+        $$->int_value = yylineno; 
     }
     ;
 

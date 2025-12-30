@@ -63,6 +63,7 @@ double parse_float(const char* txt) {
 "externo"   { if (debug_mode) printf("[LEX] TOKEN_EXTERNO\n"); return TOKEN_EXTERNO; }
 "funcao"    { if (debug_mode) printf("[LEX] TOKEN_FUNCAO\n"); return TOKEN_FUNCAO; }
 "estrutura" { if (debug_mode) printf("[LEX] TOKEN_ESTRUTURA\n"); return TOKEN_ESTRUTURA; }
+"garantir"  { if (debug_mode) printf("[LEX] TOKEN_ASSERT\n"); return TOKEN_ASSERT; }
 
 ";"         { return TOKEN_SEMICOLON; }
 \.\.        { return TOKEN_DOTDOT; } /* Range Operator 0..10 */
