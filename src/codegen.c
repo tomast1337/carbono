@@ -120,6 +120,27 @@ const char *map_type(const char *type)
 // Forward declaration
 void codegen(ASTNode *node, FILE *file);
 
+// Helper to generate function signatures (e.g. "int sum(int a, int b)")
+void codegen_func_signature(ASTNode* node, FILE* file) {
+    fprintf(file, "%s %s(", map_type(node->data_type), node->name);
+    
+    // Last child is the body block, everything before is params
+    int param_count = arrlen(node->children) - 1;
+    
+    for (int i = 0; i < param_count; i++) {
+        ASTNode* param = node->children[i];
+        if (i > 0) fprintf(file, ", ");
+        
+        // METHOD LOGIC: If param is named "self", make it a pointer
+        if (strcmp(param->name, "self") == 0) {
+            fprintf(file, "%s* self", map_type(param->data_type));
+        } else {
+            fprintf(file, "%s %s", map_type(param->data_type), param->name);
+        }
+    }
+    fprintf(file, ")");
+}
+
 // Helper to check if a string starts with a prefix
 static int starts_with(const char *str, const char *prefix) {
     size_t prefix_len = strlen(prefix);
@@ -188,28 +209,55 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
             
             // GENERATE PRINTF
             if (parsing_opts && o_idx > 0) {
-                // User provided options: ${pi:.2f}
+                // User provided options: ${pi:.2f} or ${self.saldo:.2f}
+                // Check if var_buffer contains property access
+                char* dot_pos = strchr(var_buffer, '.');
+                char* actual_var = var_buffer;
+                char* prop_name = NULL;
+                
+                if (dot_pos != NULL) {
+                    *dot_pos = '\0';
+                    prop_name = dot_pos + 1;
+                    actual_var = var_buffer;
+                }
+                
+                // Build the expression to print
+                char expr_buffer[256] = {0};
+                if (prop_name != NULL) {
+                    if (strcmp(actual_var, "self") == 0) {
+                        snprintf(expr_buffer, sizeof(expr_buffer), "self->%s", prop_name);
+                    } else {
+                        snprintf(expr_buffer, sizeof(expr_buffer), "%s.%s", actual_var, prop_name);
+                    }
+                } else {
+                    snprintf(expr_buffer, sizeof(expr_buffer), "%s", var_buffer);
+                }
+                
                 // We ensure it starts with '%' for C printf
                 if (opt_buffer[0] != '%') {
-                    fprintf(file, "    printf(\"%%%s\", %s);\n", opt_buffer, var_buffer);
+                    fprintf(file, "    printf(\"%%%s\", %s);\n", opt_buffer, expr_buffer);
                 } else {
-                    fprintf(file, "    printf(\"%s\", %s);\n", opt_buffer, var_buffer);
+                    fprintf(file, "    printf(\"%s\", %s);\n", opt_buffer, expr_buffer);
                 }
             } else {
                 // No options: ${x} -> Use generic macro
                 // Check if this is a method call (e.g., m.len, arr.push)
                 char* dot_pos = strchr(var_buffer, '.');
                 if (dot_pos != NULL) {
-                    // Method call: m.len -> arrlen(m), arr.push -> arrput(arr, ...)
+                    // Property access or method call: self.nome, arr.len, etc.
                     *dot_pos = '\0'; // Split at '.'
-                    char* method_name = dot_pos + 1;
+                    char* prop_or_method = dot_pos + 1;
                     char* var_name = var_buffer;
                     
-                    if (strcmp(method_name, "len") == 0) {
+                    // Check if it's a known array method
+                    if (strcmp(prop_or_method, "len") == 0) {
                         fprintf(file, "    printf(print_any(arrlen(%s)), arrlen(%s));\n", var_name, var_name);
+                    } else if (strcmp(var_name, "self") == 0) {
+                        // self.property -> self->property (self is a pointer in methods)
+                        fprintf(file, "    printf(print_any(self->%s), self->%s);\n", prop_or_method, prop_or_method);
                     } else {
-                        // Unknown method, just output as-is (will cause compile error)
-                        fprintf(file, "    printf(print_any(%s.%s), %s.%s);\n", var_name, method_name, var_name, method_name);
+                        // Regular property access: obj.property -> obj.property
+                        fprintf(file, "    printf(print_any(%s.%s), %s.%s);\n", var_name, prop_or_method, var_name, prop_or_method);
                     }
                 } else {
                     // Regular variable
@@ -281,9 +329,9 @@ void codegen(ASTNode *node, FILE *file)
     switch (node->type)
     {
     case NODE_PROGRAM:
-        // Initialize symbol table for codegen
-        scope_enter(); // Global scope
+        scope_enter(); // Global Scope
         
+        // --- 0. PREAMBLE ---
         fprintf(file, "#include <stdio.h>\n");
         fprintf(file, "#include <stdlib.h>\n");
         fprintf(file, "#include <string.h>\n");
@@ -331,14 +379,73 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
         fprintf(file, "    flush_input();\n");
         fprintf(file, "}\n\n");
-        fprintf(file, "int main() {\n");
-        // Generate the body (the block inside the program)
-        for (int i = 0; i < arrlen(node->children); i++)
-        {
-            codegen(node->children[i], file);
+        
+        // Metadata
+        fprintf(file, "const char* NOME_PROGRAMA = \"%s\";\n\n", node->name);
+
+        // Get the program block (first child)
+        ASTNode* program_block = (arrlen(node->children) > 0) ? node->children[0] : NULL;
+        if (!program_block) {
+            // Empty program
+            fprintf(file, "\nint main(int argc, char** argv) {\n");
+            fprintf(file, "    return 0;\n");
+            fprintf(file, "}\n");
+            scope_exit();
+            break;
         }
+
+        // --- PASS 1: STRUCT DEFINITIONS ---
+        // We define types first so functions can use them
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            if (program_block->children[i]->type == NODE_STRUCT_DEF) {
+                codegen(program_block->children[i], file);
+            }
+        }
+
+        // --- PASS 2: FUNCTION PROTOTYPES ---
+        // Allows functions to call each other out of order
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            if (program_block->children[i]->type == NODE_FUNC_DEF) {
+                codegen_func_signature(program_block->children[i], file);
+                fprintf(file, ";\n");
+            }
+        }
+        fprintf(file, "\n");
+
+        // --- PASS 3: FUNCTION IMPLEMENTATIONS ---
+        // Hoist functions out of main
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            if (program_block->children[i]->type == NODE_FUNC_DEF) {
+                codegen(program_block->children[i], file);
+            }
+        }
+
+        // --- PASS 4: MAIN EXECUTION ---
+        fprintf(file, "\nint main(int argc, char** argv) {\n");
+        scope_enter(); // Scope for Main
+        
+        // Expose args as Carbono array
+        // (Optional: You can add code here to convert argv to [texto] args)
+
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            ASTNode* child = program_block->children[i];
+            // Skip definitions, only generate statements
+            if (child->type != NODE_STRUCT_DEF && child->type != NODE_FUNC_DEF) {
+                if (child->type == NODE_METHOD_CALL) {
+                    fprintf(file, "    ");
+                    codegen(child, file);
+                    fprintf(file, ";\n");
+                } else {
+                    codegen(child, file);
+                }
+            }
+        }
+        
+        scope_exit(); // Exit Main Scope
         fprintf(file, "    return 0;\n");
         fprintf(file, "}\n");
+        
+        scope_exit(); // Exit Global Scope
         break;
 
     case NODE_BLOCK:
@@ -981,6 +1088,60 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, ", %d);\n", node->int_value);
         fprintf(file, "        exit(1);\n");
         fprintf(file, "    }\n");
+        break;
+
+    case NODE_FUNC_DEF:
+        // Signature
+        codegen_func_signature(node, file);
+        fprintf(file, " ");
+        
+        // Body (Last child)
+        // Note: The body is a NODE_BLOCK. codegen_block handles scope_enter/exit.
+        // BUT: We need to register parameters in that scope!
+        
+        // Manual block generation to inject params into scope
+        int total_children = arrlen(node->children);
+        if (total_children == 0) {
+            // No body (shouldn't happen, but handle gracefully)
+            fprintf(file, "{\n}\n\n");
+            break;
+        }
+        
+        ASTNode* body = node->children[total_children - 1];
+        fprintf(file, "{\n");
+        scope_enter(); // Function Scope
+        
+        // 1. Register Parameters in Symbol Table
+        int param_count = total_children - 1;
+        for(int i=0; i<param_count; i++) {
+            ASTNode* p = node->children[i];
+            scope_bind(p->name, p->data_type);
+        }
+        
+        // 2. Generate Body Children
+        if (body && body->children) {
+            for(int i=0; i<arrlen(body->children); i++) {
+                 ASTNode* child = body->children[i];
+                 if (child->type == NODE_METHOD_CALL) {
+                    fprintf(file, "    ");
+                    codegen(child, file);
+                    fprintf(file, ";\n");
+                 } else {
+                    codegen(child, file);
+                 }
+            }
+        }
+        
+        scope_exit();
+        fprintf(file, "}\n\n");
+        break;
+
+    case NODE_RETURN:
+        fprintf(file, "    return ");
+        if (arrlen(node->children) > 0) {
+            codegen(node->children[0], file);
+        }
+        fprintf(file, ";\n");
         break;
 
     default:

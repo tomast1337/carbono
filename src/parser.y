@@ -31,7 +31,7 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
-%token TOKEN_ESTRUTURA TOKEN_ASSERT
+%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE
 
 %left '+' '-'
 %left '*' '/'
@@ -42,7 +42,7 @@ ASTNode* root_node = NULL;
 %left '('
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt
 
 %%
 
@@ -104,6 +104,16 @@ statements:
         $$ = $1;
         ast_add_child($$, $2);
     }
+    | statements func_def {
+        /* Function definitions don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | statements return_stmt {
+        /* Return statements need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
     | /* empty */ {
         $$ = ast_new(NODE_BLOCK);
     }
@@ -118,6 +128,8 @@ statement:
     | assign_stmt
     | input_stmt
     | struct_def
+    | func_def     /* Allow functions inside program */
+    | return_stmt  /* Allow return */
     | assert_stmt
     | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
@@ -593,6 +605,48 @@ assert_stmt:
         ast_add_child($$, $3);         // The condition expression
         // Store line number for the panic message
         $$->int_value = yylineno; 
+    }
+    ;
+
+/* Function Definition: funcao nome(a: int): int { ... } */
+func_def:
+    TOKEN_FUNCAO TOKEN_ID '(' param_list ')' ':' type_def block {
+        $$ = ast_new(NODE_FUNC_DEF);
+        $$->name = sdsnew($2);
+        $$->data_type = $7->string_value ? sdsnew($7->string_value) : sdsnew("void");
+        
+        // Children: [Param1, Param2, ..., ParamN, Block]
+        for(int i=0; i<arrlen($4->children); i++) {
+            ast_add_child($$, $4->children[i]);
+        }
+        ast_add_child($$, $8); // The body block is the last child
+    }
+    ;
+
+param_list:
+    param_list ',' param {
+        $$ = $1;
+        ast_add_child($$, $3);
+    }
+    | param {
+        $$ = ast_new(NODE_BLOCK); // Temp container
+        ast_add_child($$, $1);
+    }
+    | /* empty */ { $$ = ast_new(NODE_BLOCK); }
+    ;
+
+param:
+    TOKEN_ID ':' type_def {
+        $$ = ast_new(NODE_VAR_DECL); // Reuse VAR_DECL for params
+        $$->name = sdsnew($1);
+        $$->data_type = $3->string_value ? sdsnew($3->string_value) : sdsnew("void");
+    }
+    ;
+
+return_stmt:
+    TOKEN_RETORNE expr TOKEN_SEMICOLON {
+        $$ = ast_new(NODE_RETURN);
+        ast_add_child($$, $2);
     }
     ;
 

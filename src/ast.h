@@ -30,7 +30,9 @@ typedef enum {
     NODE_METHOD_CALL, // arr.len, arr.push(x)
     NODE_STRUCT_DEF,   // estrutura Player { ... }
     NODE_PROP_ACCESS,  // p.x
-    NODE_ASSERT        // garantir(condição, "Mensagem")
+    NODE_ASSERT,       // garantir(condição, "Mensagem")
+    NODE_FUNC_DEF,     // funcao soma(...) { ... }
+    NODE_RETURN        // retorne x;
 } NodeType;
 
 typedef struct ASTNode {
