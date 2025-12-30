@@ -11,7 +11,7 @@ programa "TreeTest" {
     }
 
     funcao inserir(self: Tree, value: inteiro32): vazio {
-        var novo_no: Node;
+        var novo_no: Node = nova Node;
         novo_no.value = value;
         novo_no.left = NULL;
         novo_no.right = NULL;
@@ -54,7 +54,7 @@ programa "TreeTest" {
         }
     }
 
-    var tree: Tree;
+    var tree: Tree = nova Tree;
     tree.root = NULL;
 
     infinito {
