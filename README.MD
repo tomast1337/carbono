@@ -1,23 +1,25 @@
 # Basalto
 
-A native compiler for Modern VisualG written in C.
+A native, systems-level compiler for a modernized VisualG-like language, written in C.
 
 ## Requirements
 
-* GCC or Clang
+* GCC or Clang (must support `-ldl` for dynamic linking)
 * Flex
 * Bison
 
 ## Build
 
-1. Compile the build system:
+Basalto uses a minimal C build system (`nob.c`) to avoid complex dependencies.
+
+1. **Bootstrap the build system:**
 ```bash
 cc -o nob nob.c
 
 ```
 
 
-2. Build the project:
+2. **Build the compiler:**
 ```bash
 ./nob
 
@@ -25,19 +27,21 @@ cc -o nob nob.c
 
 
 
+This generates the `basalto` binary in the `./build/` directory.
+
 ## Usage
 
-Compile a `.bas` file:
+Compile a `.bso` file:
 
 ```bash
-./build/basalto input.bas
+./build/basalto input.bso
 
 ```
 
-This produces a native executable (default name: `output`). Run it:
+This produces a native executable (default name: `program`). Run it:
 
 ```bash
-./output
+./program
 
 ```
 
@@ -51,51 +55,102 @@ Now, having finished high school and completed a Computer Science degree at [CEF
 
 ### The Philosophy
 
-This project is a variation of the VisualG language (rooted in Pascal) but aligned with modern standards.
+Basalto is a hybrid language. It reimagines the educational accessibility of **VisualG** by fusing it with the syntactic precision and structure of modern systems languages.
 
-* **Syntax:** Familiarity of Pascal.
-* **Modernity and Simplicity:** The minimal overhead of **C** and **Zig**.
+* **Syntax:** A unique blend. It keeps the friendly Portuguese keywords of **VisualG/Pascal** but adopts the concise block structure (`{}`) of **C** and the explicit type declarations (`var x: type`) found in **Go** and **Zig**.
+* **Performance:** The raw speed, manual memory control, and zero-cost abstractions of **C**.
+* **Architecture:** "Low Floor, High Ceiling" — approachable enough for a first-time learner, yet structurally robust enough for professional systems engineering.
 
 ### The Goal: FFI (Foreign Function Interface)
 
-The ultimate goal of Basalto is robust support for **FFI**. By allowing the language to interact seamlessly with system functions and C libraries, we remove the "toy language" ceiling. This will finally enable a VisualG-like syntax to power:
+The defining feature of Basalto is robust support for **FFI**. By allowing the language to interact seamlessly with system functions and C libraries (`.so`/`.dll`), we remove the "toy language" ceiling. This finally enables a VisualG-like syntax to power:
 
-* Graphical User Interfaces (UI)
-* Web Servers
-* Complex I/O and Graphics
-* System-level programming
+* Graphical User Interfaces (UI) via libraries like Raylib or GTK.
+* Web Servers and Networking.
+* Complex I/O and System-level programming.
+
+## Language Features (v1.0)
+
+### 1. Variables & Types
+
+Strongly typed with inference support.
+
+```go
+var x: inteiro = 42;
+var pi: real = 3.1415;
+var nome: texto = "Mundo";
+
+```
+
+### 2. Structs & Methods
+
+Object-oriented capabilities using C-like structs and Uniform Call Syntax.
+
+```go
+estrutura Player {
+    hp: inteiro
+    nome: texto
+}
+
+// 'self' automatically acts as a pointer to the struct
+funcao curar(self: Player, qtd: inteiro): vazio {
+    self.hp = self.hp + qtd;
+}
+
+```
+
+### 3. Native FFI
+
+Load C libraries dynamically and map symbols to Basalto functions.
+
+```go
+externo math "libm.so.6" {
+    // Maps the C symbol "cos" to the Basalto name "cosseno"
+    funcao cosseno(x: real): real = "cos"
+}
+
+```
+
+### 4. Dynamic Arrays
+
+Arrays act as vectors with automatic resizing.
+
+```go
+var lista: [inteiro] = [1, 2];
+lista.push(3);
+escreval("Tamanho: ${lista.len()}");
+
+```
+
+### 5. File Embedding
+
+Bake assets (text or binary) directly into the executable.
+
+```go
+var shader: texto = incorporar("shaders/vertex.glsl");
+
+```
 
 ## Methodological Basis
 
-Basalto is architected as a **Source-to-Source Compiler** (Transpiler), a design choice supported by decades of compiler literature to ensure portability, performance, and educational efficacy.
+Basalto is architected as a **Source-to-Source Compiler** (Transpiler).
 
-### 1. C as a Portable Intermediate Representation
+Instead of targeting machine code directly or complex IRs like LLVM, Basalto targets **C99**. This approach treats C as a "portable assembly," a technique pioneered by the first C++ compiler (*Cfront*) and validated by modern research.
 
-Instead of targeting machine code directly or complex IRs like LLVM, Basalto targets **C99**. This approach treats C as a "portable assembly," a technique pioneered by the first C++ compiler (*Cfront*) and validated by modern research [1].
+* **Portability:** By emitting standard C, Basalto programs can run on any architecture (x86, ARM, RISC-V) that supports a C compiler.
+* **Optimization:** We leverage the mature optimization pipelines of existing compilers (GCC/Clang), which perform register allocation and instruction scheduling far better than a custom backend could.
 
-* **Portability:** By emitting standard C, Basalto programs can run on any architecture (x86, ARM, RISC-V) that supports a C compiler, without requiring backend-specific maintenance.
-* **Optimization:** We leverage the mature optimization pipelines of existing compilers (GCC/Clang), which perform register allocation and instruction scheduling far better than a custom backend could [2].
+## Compilation Pipeline
 
-### 2. Pedagogical Design: "Low Floor, High Ceiling"
-
-The primary architectural goal is to solve the "toy language" problem common in CS education. Seymour Papert’s constructionist theory emphasizes that effective learning tools must have a **"Low Floor"** (easy entry for novices) and a **"High Ceiling"** (capable of complex professional work) [3].
-
-* **The Floor (VisualG Compatibility):** We maintain the accessible Portuguese syntax of VisualG to ensure zero friction for students entering from high school technical courses.
-* **The Ceiling (FFI & Native compilation):** Existing tools like VisualG impose an artificial "ceiling" by preventing system-level interaction [4]. Basalto removes this by allowing **Foreign Function Interface (FFI)** calls to C libraries. This enables students to transition from simple algorithms to building real-world software (Web Servers, GUIs) without switching languages.
-
-### 3. Compilation Pipeline
-
-The compiler follows a standard 4-stage architecture [5]:
+The compiler follows a standard 4-stage architecture:
 
 1. **Lexical Analysis (Flex):** Tokenization of the source stream.
 2. **Syntactic Analysis (Bison):** Construction of the Abstract Syntax Tree (AST).
-3. **Semantic Analysis & Codegen:** recursive descent of the AST to emit C99 code.
-4. **Native Build:** Invocation of the host compiler via `nob.c` to produce the final binary.
+3. **Semantic Analysis & Hoisting:** A multi-pass traversal that separates definitions (structs, functions) from execution logic, allowing functions to be defined anywhere in the file.
+4. **Codegen & Build:** Emits C99 code and invokes the host compiler via `nob.c` to produce the final binary.
 
-### References
+## References
 
-* **[1] Stroustrup, B. (1986).** *The C++ Programming Language*. Addison-Wesley. (See discussion on *Cfront* implementation).
-* **[2] Necula, G. C., et al. (2002).** "CIL: Intermediate Language and Tools for Analysis and Transformation of C Programs." *Proceedings of CC 2002*.
-* **[3] Papert, S. (1980).** *Mindstorms: Children, Computers, and Powerful Ideas*. Basic Books.
-* **[4] Resnick, M., et al. (2009).** "Scratch: Programming for All." *Communications of the ACM*, 52(11). (Discusses the importance of "Wide Walls" and extending ceilings).
-* **[5] Aho, A. V., Lam, M. S., Sethi, R., & Ullman, J. D. (2006).** *Compilers: Principles, Techniques, and Tools (2nd Edition)*. Pearson.
+* **Stroustrup, B. (1986).** *The C++ Programming Language*. Addison-Wesley.
+* **Papert, S. (1980).** *Mindstorms: Children, Computers, and Powerful Ideas*. Basic Books.
+* **Resnick, M., et al. (2009).** "Scratch: Programming for All." *Communications of the ACM*.
