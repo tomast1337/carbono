@@ -1,0 +1,26 @@
+{
+  "name": "basalto",
+  "displayName": "Basalto",
+  "description": "Language support for Basalto",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "icon": "icon.png",
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "basalto",
+      "aliases": ["Basalto", "basalto"],
+      "extensions": [".bso"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "basalto",
+      "scopeName": "source.basalto",
+      "path": "./syntaxes/basalto.tmLanguage.json"
+    }]
+  }
+}

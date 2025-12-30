@@ -1,0 +1,116 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Basalto",
+    "patterns": [
+      {
+        "include": "#comments"
+      },
+      {
+        "include": "#struct_definition"
+      },
+      {
+        "include": "#type_annotation"
+      },
+      {
+        "include": "#keywords"
+      },
+      {
+        "include": "#types"
+      },
+      {
+        "include": "#strings"
+      },
+      {
+        "include": "#numbers"
+      },
+      {
+        "include": "#functions"
+      }
+    ],
+    "repository": {
+      "struct_definition": {
+        "match": "\\b(estrutura)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        "captures": {
+          "1": { "name": "keyword.other.basalto" },
+          "2": { "name": "entity.name.type.class.basalto" }
+        }
+      },
+      "type_annotation": {
+        "comment": "Matches ': Type' or ': [Type]'",
+        "match": "(:)\\s*(\\[?\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*\\]?)",
+        "captures": {
+          "1": { "name": "keyword.operator.type.annotation.basalto" },
+          "2": { "name": "entity.name.type.basalto" }
+        }
+      },
+      "keywords": {
+        "patterns": [
+          {
+            "name": "keyword.control.basalto",
+            "match": "\\b(se|senao|enquanto|cada|infinito|parar|continuar|retorne|garantir)\\b"
+          },
+          {
+            "name": "keyword.other.basalto",
+            "match": "\\b(programa|funcao|estrutura|externo|var|alias)\\b"
+          },
+          {
+            "name": "keyword.operator.new.basalto",
+            "match": "\\b(ler|escreval)\\b"
+          }
+        ]
+      },
+      "types": {
+        "patterns": [
+          {
+            "name": "storage.type.basalto",
+            "match": "\\b(inteiro|inteiro32|inteiro64|real|real32|real64|texto|booleano|vazio)\\b"
+          },
+          {
+            "name": "constant.language.basalto",
+            "match": "\\b(verdadeiro|falso)\\b"
+          }
+        ]
+      },
+      "strings": {
+        "name": "string.quoted.double.basalto",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [
+          {
+            "name": "constant.character.escape.basalto",
+            "match": "\\\\."
+          },
+          {
+            "name": "variable.other.interpolation.basalto",
+            "match": "\\$\\{[^\\}]+\\}"
+          }
+        ]
+      },
+      "comments": {
+        "patterns": [
+          {
+            "name": "comment.line.double-slash.basalto",
+            "match": "//.*$"
+          },
+          {
+            "name": "comment.block.basalto",
+            "begin": "/\\*",
+            "end": "\\*/"
+          }
+        ]
+      },
+      "functions": {
+        "patterns": [
+          {
+            "name": "entity.name.function.basalto",
+            "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\()"
+          }
+        ]
+      },
+      "numbers": {
+          "name": "constant.numeric.basalto",
+          "match": "\\b\\d+(\\.\\d+)?(r|f)?\\b"
+      }
+    },
+    "scopeName": "source.basalto"
+  }
