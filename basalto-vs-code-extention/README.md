@@ -1,65 +1,113 @@
-# basalto README
+# Basalto Language Support for VS Code
 
-This is the README for your extension "basalto". After writing up a brief description, we recommend including the following sections.
+Visual Studio Code extension providing syntax highlighting and language configuration for the Basalto programming language.
+
+## Overview
+
+This extension adds language support for Basalto, a Portuguese-first programming language. It provides syntax highlighting, bracket matching, indentation rules, and other editor features to improve the development experience when working with Basalto source files.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **Syntax Highlighting** - Comprehensive syntax highlighting for Basalto source code
+- **Language Configuration** - Bracket matching, auto-closing pairs, and indentation rules
+- **Comment Support** - Line comments (`//`) and block comments (`/* */`)
+- **String Interpolation** - Syntax highlighting for string interpolation expressions (`${variable}`)
+- **Type Annotations** - Highlighting for type annotations (`: tipo`)
+- **Struct Definitions** - Special highlighting for `estrutura` definitions
 
-For example if there is an image subfolder under your extension project workspace:
+## Installation
 
-\!\[feature X\]\(images/feature-x.png\)
+### From VS Code Marketplace
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+1. Open Visual Studio Code
+2. Navigate to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+3. Search for "Basalto"
+4. Click Install
+
+### From VSIX Package
+
+Install from a `.vsix` file using the command line:
+
+```bash
+code --install-extension basalto-0.0.1.vsix
+```
+
+## File Association
+
+Files with the `.bso` extension are automatically recognized as Basalto source code and will receive syntax highlighting and language features.
+
+## Language Features
+
+### Keyword Highlighting
+
+**Control Flow Keywords:**
+- `se`, `senao`, `enquanto`, `cada`, `infinito`
+- `parar`, `continuar`, `retorne`, `garantir`
+
+**Declaration Keywords:**
+- `programa`, `funcao`, `estrutura`, `externo`, `var`, `alias`
+
+**I/O Keywords:**
+- `ler`, `escreval`
+
+### Type Highlighting
+
+**Numeric Types:**
+- `inteiro`, `inteiro32`, `inteiro64`
+
+**Floating-Point Types:**
+- `real`, `real32`, `real64`
+
+**Other Types:**
+- `texto`, `booleano`, `vazio`
+
+**Boolean Literals:**
+- `verdadeiro`, `falso`
+
+### Syntax Features
+
+- **Comments**: Line comments (`//`) and block comments (`/* */`)
+- **Strings**: Double-quoted strings with escape sequence support and interpolation syntax
+- **Numbers**: Integer and floating-point literals with optional type suffixes (`r`, `f`)
+- **Functions**: Function identifiers are highlighted
+- **Structs**: Structure definitions using the `estrutura` keyword are highlighted
+
+## Example
+
+```basalto
+programa "Exemplo" {
+    var nome: texto = "Basalto";
+    var idade: inteiro32 = 25;
+    
+    escreval("Olá, ${nome}! Você tem ${idade} anos.");
+    
+    se (idade > 18) {
+        escreval("Você é maior de idade.");
+    }
+}
+```
+
+## Editor Configuration
+
+The extension automatically configures the following editor features:
+
+- Bracket matching for braces (`{}`), brackets (`[]`), and parentheses (`()`)
+- Auto-closing pairs for brackets and quotes
+- Indentation rules based on brace structure
+- Comment toggling support
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Visual Studio Code version 1.107.0 or higher
 
-## Extension Settings
+## Contributing
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Contributions are welcome. Please submit issues or pull requests through the project repository.
 
-For example:
+## License
 
-This extension contributes the following settings:
+[Specify license]
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Changelog
 
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+See [CHANGELOG.md](./CHANGELOG.md) for version history and change details.
