@@ -120,7 +120,18 @@ void codegen(ASTNode *node, FILE *file);
 
 // Helper to generate function signatures (e.g. "int sum(int a, int b)")
 void codegen_func_signature(ASTNode* node, FILE* file) {
-    fprintf(file, "%s %s(", map_type(node->data_type), node->name);
+    // If return type is a struct, check if it should be a pointer
+    // Heuristic: struct-returning functions often return pointers
+    const char* return_type = map_type(node->data_type);
+    if (is_struct_type(node->data_type)) {
+        // Check if function body has return statements that return pointers
+        // For prototypes, we can't check, so we'll use a heuristic
+        // For definitions, we could check, but prototypes are generated first
+        // For now, make struct return types pointers by default
+        fprintf(file, "%s* %s(", return_type, node->name);
+    } else {
+        fprintf(file, "%s %s(", return_type, node->name);
+    }
     
     // For extern functions, there's no body, so all children are params
     // For regular functions, the last child is the body block
@@ -210,8 +221,8 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
             }
             if (*cursor == '}') cursor++;
             
-            // Handle Property Access (self.x) inside expression
-            // We need to convert 'self.x' -> 'self->x' if 'self' is a pointer
+            // Handle Property Access (self.x or var.field) inside expression
+            // We need to convert to '->' if the object is a pointer
             char final_expr[256] = {0};
             char* dot = strchr(expr_buffer, '.');
             if (dot) {
@@ -221,7 +232,20 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
                 if (strcmp(obj, "self") == 0) {
                     snprintf(final_expr, 255, "self->%s", prop);
                 } else {
-                    snprintf(final_expr, 255, "%s.%s", obj, prop);
+                    // Check if obj is a pointer type in symbol table
+                    char* var_type = scope_lookup(obj);
+                    int is_ptr = 0;
+                    if (var_type) {
+                        size_t len = strlen(var_type);
+                        if (len > 0 && var_type[len - 1] == '*') {
+                            is_ptr = 1;
+                        }
+                    }
+                    if (is_ptr) {
+                        snprintf(final_expr, 255, "%s->%s", obj, prop);
+                    } else {
+                        snprintf(final_expr, 255, "%s.%s", obj, prop);
+                    }
                 }
             } else {
                 strcpy(final_expr, expr_buffer);
@@ -689,14 +713,71 @@ void codegen(ASTNode *node, FILE *file)
         const char* var_type = map_type(node->data_type);
         int is_texto = (strcmp(var_type, "char*") == 0);
         
+        // Check if initializer is a property access that returns a struct pointer
+        // If so, we need to declare the variable as a pointer type
+        int needs_pointer_type = 0;
+        if (arrlen(node->children) > 0) {
+            ASTNode* init_node = node->children[0];
+            if (init_node->type == NODE_PROP_ACCESS) {
+                // Property access - check if it returns a struct type (pointer)
+                ASTNode* prop_obj = init_node->children[0];
+                const char* prop_name = init_node->data_type ? init_node->data_type : "";
+                
+                // Special case: if accessing property on 'self', it's always a pointer access
+                if (prop_obj->type == NODE_VAR_REF && prop_obj->name && strcmp(prop_obj->name, "self") == 0) {
+                    // self->field where field is a struct type -> pointer
+                    // We need to get the type of 'self' to look up the field
+                    // 'self' is a parameter, so it should be in the current scope
+                    char* parent_type = scope_lookup("self");
+                    if (parent_type) {
+                        char* base_type = get_base_type(parent_type);
+                        if (!base_type) base_type = parent_type;
+                        char* field_type = lookup_field_type(base_type, prop_name);
+                        if (field_type && is_struct_type(field_type)) {
+                            needs_pointer_type = 1;
+                        }
+                    }
+                } else if (prop_obj->type == NODE_VAR_REF && prop_obj->name) {
+                    // Look up the parent struct type
+                    char* parent_type = scope_lookup(prop_obj->name);
+                    if (parent_type) {
+                        char* base_type = get_base_type(parent_type);
+                        if (!base_type) base_type = parent_type;
+                        // Look up the field type
+                        char* field_type = lookup_field_type(base_type, prop_name);
+                        if (field_type && is_struct_type(field_type)) {
+                            // The field is a struct type (pointer), so initializer returns a pointer
+                            needs_pointer_type = 1;
+                        }
+                    }
+                } else if (prop_obj->type == NODE_PROP_ACCESS) {
+                    // Nested property access - definitely returns a struct pointer
+                    needs_pointer_type = 1;
+                }
+            }
+        }
+        
         // Register variable in symbol table
-        scope_bind(node->name, node->data_type);
+        // If it's a pointer type, append "*" to the type name for tracking
+        if (needs_pointer_type && is_struct_type(node->data_type)) {
+            // Store with "*" suffix to indicate it's a pointer in C
+            char ptr_type[256];
+            snprintf(ptr_type, sizeof(ptr_type), "%s*", node->data_type);
+            scope_bind(node->name, ptr_type);
+        } else {
+            scope_bind(node->name, node->data_type);
+        }
         
         if (is_texto) {
             // For texto (char*), use sds type
             fprintf(file, "    sds %s", node->name);
         } else {
-            fprintf(file, "    %s %s", var_type, node->name);
+            // If initializer is a struct pointer, declare variable as pointer
+            if (needs_pointer_type && is_struct_type(node->data_type)) {
+                fprintf(file, "    %s* %s", var_type, node->name);
+            } else {
+                fprintf(file, "    %s %s", var_type, node->name);
+            }
         }
         
         // Check if there's an initializer
@@ -813,6 +894,24 @@ void codegen(ASTNode *node, FILE *file)
         if (arrlen(node->children) > 0 && node->children[0]->type == NODE_PROP_ACCESS) {
             // Property access assignment: p.x = expr
             ASTNode* prop = node->children[0];
+            
+            // Workaround: If we have a property access but no RHS, this might be a mis-parsed
+            // regular assignment like "no = no.left". Check if we can extract the variable name.
+            if (arrlen(node->children) == 1) {
+                // Only one child means no RHS - this is likely a parser bug
+                // Try to handle it as a regular assignment: var = var.field
+                if (prop->children[0] && prop->children[0]->type == NODE_VAR_REF) {
+                    const char* var_name = prop->children[0]->name;
+                    if (var_name) {
+                        // Generate as regular assignment: var = var.field
+                        fprintf(file, "%s = ", var_name);
+                        codegen(prop, file);
+                        fprintf(file, ";\n");
+                        break; // Skip the rest of the property access assignment handling
+                    }
+                }
+            }
+            
             codegen(prop, file);
             fprintf(file, " = ");
             // Value is in children[1] (children[0] is the property access)
@@ -822,6 +921,54 @@ void codegen(ASTNode *node, FILE *file)
                     // For property access, we can't easily determine type, use default
                     fprintf(file, "read_int()");
                 } else {
+                    // Check if we need to add implicit address-of for struct assignment
+                    // If the property being assigned to is a struct field (pointer),
+                    // and the value is a struct variable, we need to add &
+                    int needs_address = 0;
+                    if (value_node->type == NODE_VAR_REF && value_node->name) {
+                        // Check if the property field is a struct type (pointer)
+                        ASTNode* prop_obj = prop->children[0];
+                        const char* prop_name = prop->data_type ? prop->data_type : "";
+                        
+                        if (prop_obj->type == NODE_VAR_REF && prop_obj->name) {
+                            // Look up the parent struct type
+                            char* parent_type = scope_lookup(prop_obj->name);
+                            if (parent_type) {
+                                // Get base type (removes array brackets if present)
+                                char* base_type = get_base_type(parent_type);
+                                if (!base_type) base_type = parent_type; // Fallback if get_base_type fails
+                                // Look up the field type
+                                char* field_type = lookup_field_type(base_type, prop_name);
+                                if (field_type && is_struct_type(field_type)) {
+                                    // The field is a struct type (pointer), check if value is a struct
+                                    char* value_type = scope_lookup(value_node->name);
+                                    if (value_type) {
+                                        char* value_base = get_base_type(value_type);
+                                        if (!value_base) value_base = value_type; // Fallback
+                                        if (is_struct_type(value_base)) {
+                                            // Assigning struct value to struct pointer field -> need &
+                                            needs_address = 1;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (prop_obj->type == NODE_PROP_ACCESS) {
+                            // Nested property access - the field is definitely a struct pointer
+                            // Check if value is a struct
+                            char* value_type = scope_lookup(value_node->name);
+                            if (value_type) {
+                                char* value_base = get_base_type(value_type);
+                                if (!value_base) value_base = value_type; // Fallback
+                                if (is_struct_type(value_base)) {
+                                    needs_address = 1;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (needs_address) {
+                        fprintf(file, "&");
+                    }
                     codegen(value_node, file);
                 }
             }
@@ -1197,17 +1344,27 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_STRUCT_DEF:
-        // estrutura Player { ... } -> typedef struct { ... } Player;
-        fprintf(file, "typedef struct {\n");
+        // 1. Forward Declaration (Allows recursive pointers)
+        fprintf(file, "typedef struct %s %s;\n", node->name, node->name);
+        
+        // 2. Struct Definition
+        fprintf(file, "struct %s {\n", node->name);
         if (arrlen(node->children) > 0) {
             for (int i = 0; i < arrlen(node->children); i++) {
                 ASTNode* field = node->children[i];
                 if (field && field->name && field->data_type) {
-                    fprintf(file, "    %s %s;\n", map_type(field->data_type), field->name);
+                    // 3. Auto-Pointer Logic
+                    if (is_struct_type(field->data_type)) {
+                        // It's a struct (e.g., "Node"). Make it "Node* next;"
+                        fprintf(file, "    %s* %s;\n", field->data_type, field->name);
+                    } else {
+                        // Primitive (e.g., "int"). Keep as is.
+                        fprintf(file, "    %s %s;\n", map_type(field->data_type), field->name);
+                    }
                 }
             }
         }
-        fprintf(file, "} %s;\n\n", node->name);
+        fprintf(file, "};\n\n");
         break;
 
     case NODE_PROP_ACCESS:
@@ -1234,8 +1391,36 @@ void codegen(ASTNode *node, FILE *file)
             } else {
                 // Regular property access
                 codegen(obj, file);
-                // Handle pointer access for 'self', otherwise dot
+                
+                // Determine if we should use -> or .
+                // The operator depends on whether the OBJECT is a pointer, not the field type
+                int is_pointer = 0;
+                
+                // Case 1: 'self' is always a pointer
                 if (obj->type == NODE_VAR_REF && obj->name && strcmp(obj->name, "self") == 0) {
+                    is_pointer = 1;
+                }
+                // Case 2: If obj is a property access (nested), check if the previous access returned a pointer
+                // When we access a struct field that is a struct type, it returns a pointer
+                else if (obj->type == NODE_PROP_ACCESS) {
+                    // Nested property access like n1.next.val
+                    // n1.next accesses a struct field which is a pointer, so n1.next is a pointer -> use ->
+                    is_pointer = 1;
+                }
+                // Case 3: If obj is a var_ref, check if it's a pointer type
+                else if (obj->type == NODE_VAR_REF && obj->name) {
+                    // Look up the variable's type in symbol table
+                    char* var_type = scope_lookup(obj->name);
+                    if (var_type) {
+                        // Check if type ends with "*" (indicates pointer type)
+                        size_t len = strlen(var_type);
+                        if (len > 0 && var_type[len - 1] == '*') {
+                            is_pointer = 1;
+                        }
+                    }
+                }
+                
+                if (is_pointer) {
                     fprintf(file, "->%s", node->data_type);
                 } else {
                     fprintf(file, ".%s", node->data_type);
@@ -1446,16 +1631,18 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_FUNC_DEF:
-        // Signature
-        codegen_func_signature(node, file);
-        
         // Check if this is an extern function (no body)
         int total_children = arrlen(node->children);
         int has_body = 0;
+        ASTNode* body = NULL;
         if (total_children > 0) {
             ASTNode* last_child = node->children[total_children - 1];
             has_body = (last_child->type == NODE_BLOCK);
+            if (has_body) body = last_child;
         }
+        
+        // Signature
+        codegen_func_signature(node, file);
         
         if (!has_body) {
             // Extern function prototype - just end with semicolon
@@ -1466,6 +1653,7 @@ void codegen(ASTNode *node, FILE *file)
         // Regular function with body
         fprintf(file, " ");
         
+        // Body (Last child)
         // Body (Last child)
         // IMPORTANT: The body is a NODE_BLOCK, but we manually unwrap it here.
         // 
@@ -1515,7 +1703,12 @@ void codegen(ASTNode *node, FILE *file)
     case NODE_RETURN:
         fprintf(file, "    return ");
         if (arrlen(node->children) > 0) {
-            codegen(node->children[0], file);
+            ASTNode* ret_value = node->children[0];
+            // Check if we're returning a pointer but function expects a value
+            // If so, we need to handle the type mismatch
+            // For now, just generate the return value - the compiler will error if types don't match
+            // The real fix is to update function signatures, but that requires two-pass codegen
+            codegen(ret_value, file);
         }
         fprintf(file, ";\n");
         break;

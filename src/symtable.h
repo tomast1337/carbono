@@ -44,5 +44,8 @@ char* get_base_type(const char* array_type);
 // Helper: Get array depth (e.g., "[[inteiro32]]" -> 2)
 int get_array_depth(const char* type);
 
+// Helper: Check if a type string refers to a Struct
+int is_struct_type(const char* type_name);
+
 #endif
 

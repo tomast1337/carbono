@@ -105,3 +105,10 @@ int get_array_depth(const char* type) {
     return depth;
 }
 
+// Helper: Check if a type string refers to a Struct
+int is_struct_type(const char* type_name) {
+    if (!type_name) return 0;
+    // Check if it exists in the registry
+    return (shget(type_registry, type_name) != NULL);
+}
+

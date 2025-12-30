@@ -1,0 +1,96 @@
+programa "TreeTest" {
+
+    estrutura Node {
+        value: inteiro32
+        left: Node
+        right: Node
+    }
+
+    estrutura Tree {
+        root: Node
+    }
+
+    funcao inserir(self: Tree, value: inteiro32): vazio {
+        var novo_no: Node;
+        novo_no.value = value;
+        novo_no.left = NULL;
+        novo_no.right = NULL;
+        self.root = novo_no;
+    }
+
+    funcao buscar(self: Tree, value: inteiro32): Node {
+        var no: Node = self.root;
+        enquanto (no != NULL) {
+            se (no.value == value) {
+                retorne no;
+            }
+            se (no.value > value) {
+                no = no.left;
+            }
+        }
+        retorne NULL;
+    }
+
+    funcao remover(self: Tree, value: inteiro32): vazio {
+        var no: Node = self.root;
+        enquanto (no != NULL) {
+            se (no.value == value) {
+                no = NULL;
+            }
+        }
+        se (no.left != NULL) {
+            no.left = NULL;
+        }
+        se (no.right != NULL) {
+            no.right = NULL;
+        }
+    }
+
+    funcao mostrar(self: Tree): vazio {
+        var no: Node = self.root;
+        enquanto (no != NULL) {
+            escreval("Valor: ${no.value}");
+            no = no.left;
+        }
+    }
+
+    var tree: Tree;
+    tree.root = NULL;
+
+    infinito {
+        // menu
+        escreval("1. Inserir");
+        escreval("2. Buscar");
+        escreval("3. Remover");
+        escreval("4. Mostrar");
+        escreval("0. Sair");
+        escreval("Digite a opcao: ");
+        var opcao: inteiro32 = ler();
+        se (opcao == 1) {
+            escreval("Digite o valor para inserir:");
+            var value: inteiro32 = ler();
+            escreval("Inserindo valor: ${value}");
+            tree.inserir(value);
+        }
+        se (opcao == 2) {
+            escreval("Digite o valor para buscar:");
+            var value: inteiro32 = ler();
+            escreval("Buscando valor: ${value}");
+            tree.buscar(value);
+        }
+        se (opcao == 3) {
+            escreval("Digite o valor para remover:");
+            var value: inteiro32 = ler();
+            escreval("Removendo valor: ${value}");
+            tree.remover(value);
+        }
+        se (opcao == 4) {
+            escreval("Mostrando arvore:");
+            tree.mostrar();
+        }
+        se (opcao == 0) {
+            parar;
+        }
+    }
+       
+}
