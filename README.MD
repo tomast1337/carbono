@@ -1,6 +1,6 @@
 # Basalto
 
-A native compiler for Modern VisualG written in C99.
+A native compiler for Modern VisualG written in C.
 
 ## Requirements
 
