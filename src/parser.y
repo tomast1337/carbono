@@ -29,7 +29,7 @@ ASTNode* root_node = NULL;
 %token <integer> TOKEN_LIT_INT
 %token <double_val> TOKEN_LIT_DOUBLE
 %token <float_val> TOKEN_LIT_FLOAT
-%token TOKEN_PROGRAMA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
+%token TOKEN_PROGRAMA TOKEN_BIBLIOTECA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
 %token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE
 
@@ -42,15 +42,28 @@ ASTNode* root_node = NULL;
 %left '('
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt extern_block extern_func_list extern_func opt_symbol_map
+%type <node> root program library block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt extern_block extern_func_list extern_func opt_symbol_map
 
 %%
 
+root:
+    program { root_node = $1; }
+    | library { root_node = $1; }
+    ;
+
 program:
     TOKEN_PROGRAMA TOKEN_LIT_STRING block {
-        root_node = ast_new(NODE_PROGRAM);
-        root_node->name = sdsnew($2);
-        ast_add_child(root_node, $3);
+        $$ = ast_new(NODE_PROGRAM);
+        $$->name = sdsnew($2);
+        ast_add_child($$, $3);
+    }
+    ;
+
+library:
+    TOKEN_BIBLIOTECA TOKEN_LIT_STRING block {
+        $$ = ast_new(NODE_LIBRARY);
+        $$->name = sdsnew($2);
+        ast_add_child($$, $3);
     }
     ;
 

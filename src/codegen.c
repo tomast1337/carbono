@@ -496,6 +496,190 @@ void codegen(ASTNode *node, FILE *file)
         scope_exit(); // Exit Global Scope
         break;
 
+    case NODE_LIBRARY:
+        scope_enter(); // Global Scope
+        
+        // --- 0. PREAMBLE (Same as Program) ---
+        fprintf(file, "#include <stdio.h>\n");
+        fprintf(file, "#include <stdlib.h>\n");
+        fprintf(file, "#include <string.h>\n");
+        fprintf(file, "#include <stdarg.h>\n");
+        fprintf(file, "#include <dlfcn.h>\n");
+        fprintf(file, "#include \"sds.h\"\n");
+        fprintf(file, "#define STB_DS_IMPLEMENTATION\n");
+        fprintf(file, "#include \"stb_ds.h\"\n\n");
+        fprintf(file, "// Auto-typing macro for printf\n");
+        fprintf(file, "#define print_any(x) _Generic((x), \\\n");
+        fprintf(file, "    int: \"%%d\", \\\n");
+        fprintf(file, "    long long: \"%%lld\", \\\n");
+        fprintf(file, "    short: \"%%hd\", \\\n");
+        fprintf(file, "    float: \"%%f\", \\\n");
+        fprintf(file, "    double: \"%%f\", \\\n");
+        fprintf(file, "    char*: \"%%s\", \\\n");
+        fprintf(file, "    char: \"%%c\", \\\n");
+        fprintf(file, "    default: \"%%d\")\n\n");
+        fprintf(file, "// Input System Runtime Helpers\n");
+        fprintf(file, "void flush_input() { \n");
+        fprintf(file, "    int c; \n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF); \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "int read_int() { \n");
+        fprintf(file, "    int x; scanf(\"%%d\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "long long read_long() { \n");
+        fprintf(file, "    long long x; scanf(\"%%lld\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "float read_float() { \n");
+        fprintf(file, "    float x; scanf(\"%%f\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "double read_double() { \n");
+        fprintf(file, "    double x; scanf(\"%%lf\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "char* read_string() {\n");
+        fprintf(file, "    sds line = sdsempty();\n");
+        fprintf(file, "    int c;\n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF) {\n");
+        fprintf(file, "        char ch = (char)c;\n");
+        fprintf(file, "        line = sdscatlen(line, &ch, 1);\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    return line;\n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "void wait_enter() {\n");
+        fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
+        fprintf(file, "    flush_input();\n");
+        fprintf(file, "}\n\n");
+        
+        // --- CONVERSION HELPERS ---
+        fprintf(file, "// Primitives to String conversions\n");
+        fprintf(file, "sds int8_to_string(signed char x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int16_to_string(short x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int32_to_string(int x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int64_to_string(long long x) { return sdscatprintf(sdsempty(), \"%%lld\", x); }\n");
+        fprintf(file, "sds int_arq_to_string(long x) { return sdscatprintf(sdsempty(), \"%%ld\", x); }\n");
+        fprintf(file, "sds float32_to_string(float x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float64_to_string(double x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float_ext_to_string(long double x) { return sdscatprintf(sdsempty(), \"%%Lf\", x); }\n");
+        fprintf(file, "sds char_to_string(char* x) { return sdsnew(x); }\n"); // Copy
+        fprintf(file, "\n");
+
+        fprintf(file, "// String to Primitives conversions\n");
+        fprintf(file, "signed char string_to_int8(char* s) { return (signed char)atoi(s); }\n");
+        fprintf(file, "short string_to_int16(char* s) { return (short)atoi(s); }\n");
+        fprintf(file, "int string_to_int32(char* s) { return atoi(s); }\n");
+        fprintf(file, "long long string_to_int64(char* s) { return atoll(s); }\n");
+        fprintf(file, "long string_to_int_arq(char* s) { return atol(s); }\n");
+        fprintf(file, "float string_to_real32(char* s) { return (float)atof(s); }\n");
+        fprintf(file, "double string_to_real64(char* s) { return atof(s); }\n");
+        fprintf(file, "long double string_to_real_ext(char* s) { return (long double)atof(s); }\n");
+        fprintf(file, "\n");
+        
+        // Metadata
+        fprintf(file, "const char* NOME_BIBLIOTECA = \"%s\";\n\n", node->name);
+
+        // Get the library block (first child)
+        ASTNode* library_block = (arrlen(node->children) > 0) ? node->children[0] : NULL;
+        if (!library_block) {
+            // Empty library
+            fprintf(file, "\nvoid __attribute__((constructor)) iniciar_%s() {\n", node->name);
+            fprintf(file, "    printf(\"[Basalto] Biblioteca '%s' carregada.\\n\");\n", node->name);
+            fprintf(file, "}\n");
+            scope_exit();
+            break;
+        }
+
+        // --- PASS 1: STRUCT DEFINITIONS ---
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            if (library_block->children[i]->type == NODE_STRUCT_DEF) {
+                codegen(library_block->children[i], file);
+            }
+        }
+
+        // --- PASS 1B: EXTERN BLOCK STRUCT DEFINITIONS ---
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            ASTNode* child = library_block->children[i];
+            if (child->type == NODE_EXTERN_BLOCK) {
+                fprintf(file, "struct {\n");
+                for(int j=0; j<arrlen(child->children); j++) {
+                    ASTNode* func = child->children[j];
+                    fprintf(file, "    %s (*%s)(", map_type(func->data_type), func->name);
+                    int param_count = arrlen(func->children);
+                    for(int k=0; k<param_count; k++) {
+                        if(k>0) fprintf(file, ", ");
+                        fprintf(file, "%s", map_type(func->children[k]->data_type));
+                    }
+                    fprintf(file, ");\n");
+                }
+                fprintf(file, "} %s;\n\n", child->name);
+                scope_bind(child->name, "MODULE");
+            }
+        }
+
+        // --- PASS 2: FUNCTION PROTOTYPES ---
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            if (library_block->children[i]->type == NODE_FUNC_DEF) {
+                codegen_func_signature(library_block->children[i], file);
+                fprintf(file, ";\n");
+            }
+        }
+        fprintf(file, "\n");
+
+        // --- PASS 3: FUNCTION IMPLEMENTATIONS ---
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            if (library_block->children[i]->type == NODE_FUNC_DEF) {
+                codegen(library_block->children[i], file);
+            }
+        }
+
+        // --- PASS 4: THE "INICIO" (Constructor) ---
+        fprintf(file, "\nvoid __attribute__((constructor)) iniciar_%s() {\n", node->name);
+        fprintf(file, "    printf(\"[Basalto] Biblioteca '%s' carregada.\\n\");\n", node->name);
+        
+        scope_enter(); // Scope for Init
+        
+        // Load extern libraries first (if any)
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            ASTNode* child = library_block->children[i];
+            if (child->type == NODE_EXTERN_BLOCK) {
+                fprintf(file, "    void* handle_%s = dlopen(\"%s\", RTLD_LAZY);\n", 
+                        child->name, child->lib_name);
+                fprintf(file, "    if (!handle_%s) {\n", child->name);
+                fprintf(file, "        fprintf(stderr, \"[Basalto] Erro FFI: %%s\\n\", dlerror());\n");
+                fprintf(file, "        exit(1);\n");
+                fprintf(file, "    }\n");
+                for(int j=0; j<arrlen(child->children); j++) {
+                    ASTNode* func = child->children[j];
+                    char* sym = func->func_alias ? func->func_alias : func->name;
+                    fprintf(file, "    %s.%s = dlsym(handle_%s, \"%s\");\n", 
+                            child->name, func->name, child->name, sym);
+                    fprintf(file, "    if (!%s.%s) {\n", child->name, func->name);
+                    fprintf(file, "        fprintf(stderr, \"[Basalto] Simbolo '%s' nao encontrado.\\n\");\n", sym);
+                    fprintf(file, "        exit(1);\n");
+                    fprintf(file, "    }\n");
+                }
+            }
+        }
+
+        // Generate Statements (Initialization logic)
+        for (int i = 0; i < arrlen(library_block->children); i++) {
+            ASTNode* child = library_block->children[i];
+            // Skip definitions, only generate statements
+            if (child->type != NODE_STRUCT_DEF && child->type != NODE_FUNC_DEF && child->type != NODE_EXTERN_BLOCK) {
+                if (child->type == NODE_METHOD_CALL) {
+                    fprintf(file, "    ");
+                    codegen(child, file);
+                    fprintf(file, ";\n");
+                } else {
+                    codegen(child, file);
+                }
+            }
+        }
+        
+        scope_exit(); // Exit Init Scope
+        fprintf(file, "}\n");
+        
+        scope_exit(); // Exit Global Scope
+        break;
+
     case NODE_BLOCK:
         codegen_block(node, file);
         break;

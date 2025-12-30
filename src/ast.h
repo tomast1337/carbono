@@ -6,6 +6,7 @@
 
 typedef enum {
     NODE_PROGRAM, // programa "Hello" { ... }
+    NODE_LIBRARY, // biblioteca "Hello" { ... }
     NODE_BLOCK, // { ... }
     NODE_VAR_DECL, // var x: int = 10
     NODE_ASSIGN, // x = 10

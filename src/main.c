@@ -81,14 +81,15 @@ int main(int argc, char** argv) {
         print_ast(root_node);
     }
 
-    // 4. Determine Output Name
-    // Priority: CLI Flag (-o) > Program Name > Default "output"
+    // 4. Determine Output Name & Type
+    // Priority: CLI Flag (-o) > Program/Library Name > Default "output"
     const char* final_name = "output";
+    int is_library = (root_node->type == NODE_LIBRARY);
     
     if (output_filename) {
         final_name = output_filename;
     } else if (root_node->name) {
-        // Use the name defined in 'programa "Name"'
+        // Use the name defined in 'programa "Name"' or 'biblioteca "Name"'
         final_name = root_node->name;
     }
 
@@ -111,12 +112,21 @@ int main(int argc, char** argv) {
     if (transpile_only) {
         printf("[Basalto] Transpilation complete: %s\n", c_filename);
     } else {
-        printf("[Basalto] Compiling binary '%s'...\n", final_name);
-        
         char cmd[1024];
-        // Note: Added -ldl for FFI support (Linux requirement)
-        // We use snprintf to insert the dynamic filenames
-        snprintf(cmd, sizeof(cmd), "gcc %s deps/sds.c -o %s -I deps -Wall -ldl -lm", c_filename, final_name);
+        
+        if (is_library) {
+            // LIBRARY MODE: Output .so, add -shared -fPIC
+            printf("[Basalto] Compiling Library '%s.so'...\n", final_name);
+            snprintf(cmd, sizeof(cmd), 
+                "gcc %s deps/sds.c -o %s.so -shared -fPIC -I deps -Wall -ldl -lm", 
+                c_filename, final_name);
+        } else {
+            // PROGRAM MODE: Output executable
+            printf("[Basalto] Compiling Executable '%s'...\n", final_name);
+            snprintf(cmd, sizeof(cmd), 
+                "gcc %s deps/sds.c -o %s -I deps -Wall -ldl -lm", 
+                c_filename, final_name);
+        }
         
         if (debug_mode) printf("[CMD] %s\n", cmd);
         
@@ -126,7 +136,11 @@ int main(int argc, char** argv) {
             return 1;
         }
         
-        printf("[Basalto] Build successful: ./%s\n", final_name);
+        if (is_library) {
+            printf("[Basalto] Build successful: ./%s.so\n", final_name);
+        } else {
+            printf("[Basalto] Build successful: ./%s\n", final_name);
+        }
     }
 
     return 0;

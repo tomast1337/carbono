@@ -51,6 +51,7 @@ double parse_float(const char* txt) {
 "/*"([^*]|\*+[^*/])*"*"+"/" { /* Ignore block comments: Match C-style block comments properly */ }
 
 "programa"  { if (debug_mode) printf("[LEX] TOKEN_PROGRAMA\n"); return TOKEN_PROGRAMA; }
+"biblioteca" { if (debug_mode) printf("[LEX] TOKEN_BIBLIOTECA\n"); return TOKEN_BIBLIOTECA; }
 "var"       { if (debug_mode) printf("[LEX] TOKEN_VAR\n"); return TOKEN_VAR; }
 "se"        { if (debug_mode) printf("[LEX] TOKEN_SE\n"); return TOKEN_SE; }
 "senao"     { if (debug_mode) printf("[LEX] TOKEN_SENAO\n"); return TOKEN_SENAO; }
