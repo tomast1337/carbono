@@ -124,8 +124,15 @@ void codegen(ASTNode *node, FILE *file);
 void codegen_func_signature(ASTNode* node, FILE* file) {
     fprintf(file, "%s %s(", map_type(node->data_type), node->name);
     
-    // Last child is the body block, everything before is params
-    int param_count = arrlen(node->children) - 1;
+    // For extern functions, there's no body, so all children are params
+    // For regular functions, the last child is the body block
+    int total_children = arrlen(node->children);
+    int param_count = total_children;
+    
+    // Check if last child is a body block (NODE_BLOCK)
+    if (total_children > 0 && node->children[total_children - 1]->type == NODE_BLOCK) {
+        param_count = total_children - 1;
+    }
     
     for (int i = 0; i < param_count; i++) {
         ASTNode* param = node->children[i];
@@ -336,6 +343,7 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "#include <stdlib.h>\n");
         fprintf(file, "#include <string.h>\n");
         fprintf(file, "#include <stdarg.h>\n");
+        fprintf(file, "#include <dlfcn.h>\n");
         fprintf(file, "#include \"sds.h\"\n");
         fprintf(file, "#define STB_DS_IMPLEMENTATION\n");
         fprintf(file, "#include \"stb_ds.h\"\n\n");
@@ -402,6 +410,33 @@ void codegen(ASTNode *node, FILE *file)
             }
         }
 
+        // --- PASS 1B: EXTERN BLOCK STRUCT DEFINITIONS ---
+        // Generate struct definitions for extern modules
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            ASTNode* child = program_block->children[i];
+            if (child->type == NODE_EXTERN_BLOCK) {
+                // Generate: struct { double (*cosseno)(double); ... } math;
+                fprintf(file, "struct {\n");
+                for(int j=0; j<arrlen(child->children); j++) {
+                    ASTNode* func = child->children[j];
+                    
+                    // Pointer: ret_type (*name)(params)
+                    fprintf(file, "    %s (*%s)(", map_type(func->data_type), func->name);
+                    
+                    int param_count = arrlen(func->children);
+                    for(int k=0; k<param_count; k++) {
+                        if(k>0) fprintf(file, ", ");
+                        fprintf(file, "%s", map_type(func->children[k]->data_type));
+                    }
+                    fprintf(file, ");\n");
+                }
+                fprintf(file, "} %s;\n\n", child->name);
+                
+                // Register as Module
+                scope_bind(child->name, "MODULE");
+            }
+        }
+
         // --- PASS 2: FUNCTION PROTOTYPES ---
         // Allows functions to call each other out of order
         for (int i = 0; i < arrlen(program_block->children); i++) {
@@ -424,13 +459,46 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "\nint main(int argc, char** argv) {\n");
         scope_enter(); // Scope for Main
         
-        // Expose args as Carbono array
+        // Expose args as Basalto array
         // (Optional: You can add code here to convert argv to [texto] args)
+
+        // Load extern libraries first
+        for (int i = 0; i < arrlen(program_block->children); i++) {
+            ASTNode* child = program_block->children[i];
+            if (child->type == NODE_EXTERN_BLOCK) {
+                // dlopen
+                fprintf(file, "    void* handle_%s = dlopen(\"%s\", RTLD_LAZY);\n", 
+                        child->name, child->lib_name);
+                        
+                // Error check
+                fprintf(file, "    if (!handle_%s) {\n", child->name);
+                fprintf(file, "        fprintf(stderr, \"[Basalto] Erro FFI: %%s\\n\", dlerror());\n");
+                fprintf(file, "        exit(1);\n");
+                fprintf(file, "    }\n");
+                
+                // dlsym loop
+                for(int j=0; j<arrlen(child->children); j++) {
+                    ASTNode* func = child->children[j];
+                    
+                    // Use alias if exists ("cos"), else use name ("tan")
+                    char* sym = func->func_alias ? func->func_alias : func->name;
+                    
+                    fprintf(file, "    %s.%s = dlsym(handle_%s, \"%s\");\n", 
+                            child->name, func->name, child->name, sym);
+                    
+                    // Optional: Check if symbol was found
+                    fprintf(file, "    if (!%s.%s) {\n", child->name, func->name);
+                    fprintf(file, "        fprintf(stderr, \"[Basalto] Simbolo '%s' nao encontrado.\\n\");\n", sym);
+                    fprintf(file, "        exit(1);\n");
+                    fprintf(file, "    }\n");
+                }
+            }
+        }
 
         for (int i = 0; i < arrlen(program_block->children); i++) {
             ASTNode* child = program_block->children[i];
             // Skip definitions, only generate statements
-            if (child->type != NODE_STRUCT_DEF && child->type != NODE_FUNC_DEF) {
+            if (child->type != NODE_STRUCT_DEF && child->type != NODE_FUNC_DEF && child->type != NODE_EXTERN_BLOCK) {
                 if (child->type == NODE_METHOD_CALL) {
                     fprintf(file, "    ");
                     codegen(child, file);
@@ -1014,12 +1082,40 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_METHOD_CALL:
         // arr.len, arr.push(x), arr.pop()
+        // Also handles: mat.seno(x) (extern module namespace calls)
         // Note: This can be used as an expression (in loops, assignments) or as a statement
         // We detect statement usage by checking the parent node type
         // For now, we'll generate without indentation/semicolon and let the parent handle it
         const char* method = node->data_type ? node->data_type : "";
         
-        if (strcmp(method, "len") == 0) {
+        // Check if this is an extern module namespace call (e.g., mat.seno(x))
+        char* base_type = NULL;
+        if (node->name) {
+            base_type = scope_lookup(node->name);
+        } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
+            base_type = scope_lookup(node->children[0]->name);
+        }
+        
+        int is_extern_module = (base_type && strcmp(base_type, "MODULE") == 0);
+        
+        if (is_extern_module) {
+            // Extern module namespace call: mat.seno(x) -> mat.seno(x)
+            if (node->name) {
+                fprintf(file, "%s.%s(", node->name, method);
+            } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
+                fprintf(file, "%s.%s(", node->children[0]->name, method);
+            }
+            
+            // Print arguments (skip the first child which is the module object)
+            // When node->name exists, children[0] is the object, children[1+] are args
+            // When node->name is NULL, children[0] is the object, children[1+] are args
+            int arg_start = 1; // Always skip first child (the object)
+            for (int i = arg_start; i < arrlen(node->children); i++) {
+                if (i > arg_start) fprintf(file, ", ");
+                codegen(node->children[i], file);
+            }
+            fprintf(file, ")");
+        } else if (strcmp(method, "len") == 0) {
             // arr.len -> arrlen(arr)
             fprintf(file, "arrlen(");
             if (node->name) {
@@ -1093,6 +1189,22 @@ void codegen(ASTNode *node, FILE *file)
     case NODE_FUNC_DEF:
         // Signature
         codegen_func_signature(node, file);
+        
+        // Check if this is an extern function (no body)
+        int total_children = arrlen(node->children);
+        int has_body = 0;
+        if (total_children > 0) {
+            ASTNode* last_child = node->children[total_children - 1];
+            has_body = (last_child->type == NODE_BLOCK);
+        }
+        
+        if (!has_body) {
+            // Extern function prototype - just end with semicolon
+            fprintf(file, ";\n");
+            break;
+        }
+        
+        // Regular function with body
         fprintf(file, " ");
         
         // Body (Last child)
@@ -1111,13 +1223,6 @@ void codegen(ASTNode *node, FILE *file)
         // - Nested blocks (in if/while/etc) still work correctly because
         //   those statements call codegen() on their block children, which
         //   properly handles nested scopes and braces
-        
-        int total_children = arrlen(node->children);
-        if (total_children == 0) {
-            // No body (shouldn't happen, but handle gracefully)
-            fprintf(file, "{\n}\n\n");
-            break;
-        }
         
         ASTNode* body = node->children[total_children - 1];
         fprintf(file, "{\n");

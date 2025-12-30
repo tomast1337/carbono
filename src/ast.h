@@ -32,7 +32,8 @@ typedef enum {
     NODE_PROP_ACCESS,  // p.x
     NODE_ASSERT,       // garantir(condição, "Mensagem")
     NODE_FUNC_DEF,     // funcao soma(...) { ... }
-    NODE_RETURN        // retorne x;
+    NODE_RETURN,       // retorne x;
+    NODE_EXTERN_BLOCK  // externo math "lib.so" { ... }
 } NodeType;
 
 typedef struct ASTNode {
@@ -51,6 +52,9 @@ typedef struct ASTNode {
     struct ASTNode* start; // Start expression
     struct ASTNode* end;   // End expression
     struct ASTNode* step;  // Step expression (can be NULL, defaults to 1)
+    // FFI fields
+    sds lib_name;      // "libm.so.6" (Stored in NODE_EXTERN_BLOCK)
+    sds func_alias;    // "cos" (Stored in NODE_FUNC_DEF, optional)
 } ASTNode;
 
 // Prototypes only!

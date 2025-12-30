@@ -1,4 +1,4 @@
-programa "SuperCarbonoSystem" {
+programa "SuperBasaltoSystem" {
     // ==========================================
     // 1. Struct Definitions (Data Layout)
     // ==========================================
@@ -13,7 +13,7 @@ programa "SuperCarbonoSystem" {
         active: booleano // 1 or 0
     }
 
-    escreval("=== INICIANDO SISTEMA CARBONO v1.0 ===");
+    escreval("=== INICIANDO SISTEMA Basalto v1.0 ===");
 
     // ==========================================
     // 2. Struct Instantiation & Property Access

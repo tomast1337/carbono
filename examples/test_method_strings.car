@@ -6,7 +6,7 @@ programa "MethodCallStrings" {
     
     // Add more words
     words.push("from");
-    words.push("carbono");
+    words.push("basalto");
     
     escreval("Total words: ${words.len}");
     

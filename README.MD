@@ -1,4 +1,4 @@
-# Carbono
+# Basalto
 
 A native compiler for Modern VisualG written in C99.
 
@@ -27,10 +27,10 @@ cc -o nob nob.c
 
 ## Usage
 
-Compile a `.car` file:
+Compile a `.bas` file:
 
 ```bash
-./build/carbono input.car
+./build/basalto input.bas
 
 ```
 
@@ -47,7 +47,7 @@ I started programming in Java at 14. When I was 15, I entered the IT technical c
 
 I remember being completely frustrated with the tool. At the time, I didn't understand its limitations. I constantly asked: *Why is the I/O so basic? Why can't I write a UI program? Why can't I write a web server?*
 
-Now, having finished high school and completed a Computer Science degree at [CEFET/RJ](https://www.cefet-rj.br/), I understand exactly why those limitations existed. **Carbono** is my attempt to fix them.
+Now, having finished high school and completed a Computer Science degree at [CEFET/RJ](https://www.cefet-rj.br/), I understand exactly why those limitations existed. **Basalto** is my attempt to fix them.
 
 ### The Philosophy
 
@@ -58,7 +58,7 @@ This project is a variation of the VisualG language (rooted in Pascal) but align
 
 ### The Goal: FFI (Foreign Function Interface)
 
-The ultimate goal of Carbono is robust support for **FFI**. By allowing the language to interact seamlessly with system functions and C libraries, we remove the "toy language" ceiling. This will finally enable a VisualG-like syntax to power:
+The ultimate goal of Basalto is robust support for **FFI**. By allowing the language to interact seamlessly with system functions and C libraries, we remove the "toy language" ceiling. This will finally enable a VisualG-like syntax to power:
 
 * Graphical User Interfaces (UI)
 * Web Servers
@@ -67,13 +67,13 @@ The ultimate goal of Carbono is robust support for **FFI**. By allowing the lang
 
 ## Methodological Basis
 
-Carbono is architected as a **Source-to-Source Compiler** (Transpiler), a design choice supported by decades of compiler literature to ensure portability, performance, and educational efficacy.
+Basalto is architected as a **Source-to-Source Compiler** (Transpiler), a design choice supported by decades of compiler literature to ensure portability, performance, and educational efficacy.
 
 ### 1. C as a Portable Intermediate Representation
 
-Instead of targeting machine code directly or complex IRs like LLVM, Carbono targets **C99**. This approach treats C as a "portable assembly," a technique pioneered by the first C++ compiler (*Cfront*) and validated by modern research [1].
+Instead of targeting machine code directly or complex IRs like LLVM, Basalto targets **C99**. This approach treats C as a "portable assembly," a technique pioneered by the first C++ compiler (*Cfront*) and validated by modern research [1].
 
-* **Portability:** By emitting standard C, Carbono programs can run on any architecture (x86, ARM, RISC-V) that supports a C compiler, without requiring backend-specific maintenance.
+* **Portability:** By emitting standard C, Basalto programs can run on any architecture (x86, ARM, RISC-V) that supports a C compiler, without requiring backend-specific maintenance.
 * **Optimization:** We leverage the mature optimization pipelines of existing compilers (GCC/Clang), which perform register allocation and instruction scheduling far better than a custom backend could [2].
 
 ### 2. Pedagogical Design: "Low Floor, High Ceiling"
@@ -81,7 +81,7 @@ Instead of targeting machine code directly or complex IRs like LLVM, Carbono tar
 The primary architectural goal is to solve the "toy language" problem common in CS education. Seymour Papert’s constructionist theory emphasizes that effective learning tools must have a **"Low Floor"** (easy entry for novices) and a **"High Ceiling"** (capable of complex professional work) [3].
 
 * **The Floor (VisualG Compatibility):** We maintain the accessible Portuguese syntax of VisualG to ensure zero friction for students entering from high school technical courses.
-* **The Ceiling (FFI & Native compilation):** Existing tools like VisualG impose an artificial "ceiling" by preventing system-level interaction [4]. Carbono removes this by allowing **Foreign Function Interface (FFI)** calls to C libraries. This enables students to transition from simple algorithms to building real-world software (Web Servers, GUIs) without switching languages.
+* **The Ceiling (FFI & Native compilation):** Existing tools like VisualG impose an artificial "ceiling" by preventing system-level interaction [4]. Basalto removes this by allowing **Foreign Function Interface (FFI)** calls to C libraries. This enables students to transition from simple algorithms to building real-world software (Web Servers, GUIs) without switching languages.
 
 ### 3. Compilation Pipeline
 

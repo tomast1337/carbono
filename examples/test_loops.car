@@ -1,7 +1,7 @@
 programa "LoopDemo" {
     
     // String interpolation examples
-    var nome:texto = "Carbono";
+    var nome:texto = "Basalto";
     var pi:real32 = 3.14159r;
     var versao:inteiro32 = 1;
     

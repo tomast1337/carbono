@@ -1,4 +1,4 @@
-programa "TesteCarbono" {
+programa "TesteBasalto" {
     // ============================================
     // Variable Declarations - All Types
     // ============================================
@@ -6,7 +6,7 @@ programa "TesteCarbono" {
     var y: inteiro32 = 20;
     var pi: real32 = 3.14r;
     var e: real64 = 2.71828;
-    var msg: texto = "Ola Carbono!";
+    var msg: texto = "Ola Basalto!";
     var greeting: texto = "Bem-vindo";
     
     /* 

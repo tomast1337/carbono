@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
             debug_mode = 1;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Usage: %s [options] <file.carbono>\n", argv[0]);
+            printf("Usage: %s [options] <file.basalto>\n", argv[0]);
             printf("Options:\n");
             printf("  --debug, -d    Enable debug output (AST tree, tokens)\n");
             printf("  --help, -h     Show this help message\n");
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     }
 
     if (!filename) {
-        printf("Usage: %s [options] <file.carbono>\n", argv[0]);
+        printf("Usage: %s [options] <file.basalto>\n", argv[0]);
         printf("Use --help for more information\n");
         return 1;
     }
@@ -71,21 +71,21 @@ int main(int argc, char** argv) {
         if (debug_mode) {
             printf("[DEBUG] Generating C code...\n");
         } else {
-            printf("[Carbono] Transpiling to C...\n");
+            printf("[Basalto] Transpiling to C...\n");
         }
         codegen(root_node, out);
         fclose(out);
 
-        printf("[Carbono] Compiling Native Binary...\n");
-        int compile_result = system("gcc output.c deps/sds.c -o program -I deps -Wall");
+        printf("[Basalto] Compiling Native Binary...\n");
+        int compile_result = system("gcc output.c deps/sds.c -o program -I deps -Wall -ldl");
         
         if (compile_result != 0) {
-            fprintf(stderr, "\n[Carbono] Error: Compilation failed!\n");
+            fprintf(stderr, "\n[Basalto] Error: Compilation failed!\n");
             fprintf(stderr, "Please check the error messages above for details.\n");
             return 1;
         }
         
-        printf("[Carbono] Done! Run with ./program\n");
+        printf("[Basalto] Done! Run with ./program\n");
     }
 
     return 0;

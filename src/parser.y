@@ -42,7 +42,7 @@ ASTNode* root_node = NULL;
 %left '('
 
 /* Types for non-terminals */
-%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt
+%type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt extern_block extern_func_list extern_func opt_symbol_map
 
 %%
 
@@ -114,6 +114,11 @@ statements:
         $$ = $1;
         ast_add_child($$, $2);
     }
+    | statements extern_block {
+        /* Extern blocks don't need semicolons */
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
     | /* empty */ {
         $$ = ast_new(NODE_BLOCK);
     }
@@ -131,6 +136,7 @@ statement:
     | func_def     /* Allow functions inside program */
     | return_stmt  /* Allow return */
     | assert_stmt
+    | extern_block /* Allow extern blocks */
     | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
          $$ = ast_new(NODE_FUNC_CALL);
@@ -648,6 +654,56 @@ return_stmt:
         $$ = ast_new(NODE_RETURN);
         ast_add_child($$, $2);
     }
+    ;
+
+extern_block:
+    /* Syntax: externo math "lib.so" { ... } */
+    TOKEN_EXTERNO TOKEN_ID TOKEN_LIT_STRING '{' extern_func_list '}' {
+        $$ = ast_new(NODE_EXTERN_BLOCK);
+        $$->name = sdsnew($2);         // Namespace "math"
+        $$->lib_name = sdsnew($3);     // Lib "lib.so"
+        
+        // Add functions
+        for(int i=0; i<arrlen($5->children); i++) {
+            ast_add_child($$, $5->children[i]);
+        }
+    }
+    ;
+
+extern_func_list:
+    extern_func_list extern_func {
+        $$ = $1;
+        ast_add_child($$, $2);
+    }
+    | /* empty */ { $$ = ast_new(NODE_BLOCK); }
+    ;
+
+extern_func:
+    /* Syntax: funcao name(...) : type [= "symbol"] */
+    TOKEN_FUNCAO TOKEN_ID '(' param_list ')' ':' type_def opt_symbol_map {
+        $$ = ast_new(NODE_FUNC_DEF);
+        $$->name = sdsnew($2);
+        $$->data_type = $7->string_value ? sdsnew($7->string_value) : sdsnew("void");
+        
+        // If opt_symbol_map returns a string node, use it. Else NULL.
+        if ($8 && $8->string_value) {
+            $$->func_alias = sdsnew($8->string_value);
+        }
+        
+        // Add params
+        for(int i=0; i<arrlen($4->children); i++) {
+            ast_add_child($$, $4->children[i]);
+        }
+        // No body child means it's external/prototype
+    }
+    ;
+
+opt_symbol_map:
+    '=' TOKEN_LIT_STRING { 
+        $$ = ast_new(NODE_LITERAL_STRING);
+        $$->string_value = sdsnew($2);
+    }
+    | /* empty */ { $$ = NULL; }
     ;
 
 array_literal:

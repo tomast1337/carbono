@@ -15,7 +15,7 @@ programa "SistemaInterativo" {
         escreval("--------------------------------");
     }
 
-    escreval("=== BEM-VINDO AO CARBONO CLI ===");
+    escreval("=== BEM-VINDO AO Basalto CLI ===");
 
     // 1. Ler Texto (String)
     escreval("Por favor, digite seu nome:");

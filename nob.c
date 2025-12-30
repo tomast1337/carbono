@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     if (!nob_cmd_run_sync(cmd))
         return 1;
 
-    // 4. Compile the Final Executable (Carbono)
+    // 4. Compile the Final Executable (Basalto)
     cmd.count = 0;
     nob_cmd_append(&cmd, "cc");
 
@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     nob_cmd_append(&cmd, "-I./deps", "-I./build", "-I./src");
 
     // Output
-    nob_cmd_append(&cmd, "-o", "build/carbono");
+    nob_cmd_append(&cmd, "-o", "build/basalto");
 
     // Source Files
     nob_cmd_append(&cmd, "src/main.c");
