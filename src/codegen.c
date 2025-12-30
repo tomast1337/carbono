@@ -63,7 +63,6 @@ const char *map_type(const char *type)
         {"inteiro16", "short"},
         {"inteiro8", "signed char"},
         {"inteiro_arq", "long"},
-        {"inteiro", "int"}, // Alias
 
         {"byte", "unsigned char"},
         {"natural32", "unsigned int"},
@@ -74,7 +73,6 @@ const char *map_type(const char *type)
 
         {"real32", "float"},
         {"real64", "double"},
-        {"real", "double"}, // Alias
         {"real_ext", "long double"},
 
         {"booleano", "int"},
@@ -177,133 +175,91 @@ static void escape_string_for_c(const char *str, FILE *file) {
 
 // THE INTERPOLATION ENGINE
 static void codegen_string_literal(const char* raw_str, FILE* file) {
-    // raw_str comes in without quotes (already removed by lexer's clean_str)
-    const char* cursor = raw_str;
+    // 1. Start Statement Expression
+    // We create a temporary variable '_s' to build the string
+    fprintf(file, "({ sds _s = sdsempty(); ");
     
+    const char* cursor = raw_str;
     while (*cursor != '\0') {
         
-        // CASE A: Start of Interpolation "${"
+        // CASE A: Interpolation "${expr}"
         if (starts_with(cursor, "${")) {
             cursor += 2; // Skip "${"
             
-            // buffer for variable name and options
-            char var_buffer[128] = {0};
-            char opt_buffer[64] = {0};
-            int v_idx = 0;
-            int o_idx = 0;
-            int parsing_opts = 0; // false
+            // Capture the expression content
+            char expr_buffer[128] = {0};
+            char fmt_buffer[64] = {0}; // For options like :.2f
+            int e_idx = 0;
+            int f_idx = 0;
+            int parsing_fmt = 0;
             
-            // Read until '}'
+            // Parse until '}'
             while (*cursor != '\0' && *cursor != '}') {
-                if (*cursor == ':') {
-                    parsing_opts = 1; // Switch to reading options
-                    cursor++;
-                    continue;
+                if (*cursor == ':') { 
+                    parsing_fmt = 1; 
+                    cursor++; 
+                    continue; 
                 }
                 
-                if (!parsing_opts) {
-                    if (v_idx < 127) {
-                        var_buffer[v_idx++] = *cursor;
-                    }
+                if (!parsing_fmt) {
+                    if (e_idx < 127) expr_buffer[e_idx++] = *cursor;
                 } else {
-                    if (o_idx < 63) {
-                        opt_buffer[o_idx++] = *cursor;
-                    }
+                    if (f_idx < 63) fmt_buffer[f_idx++] = *cursor;
                 }
                 cursor++;
             }
-            if (*cursor == '}') cursor++; // Skip closing '}'
+            if (*cursor == '}') cursor++;
             
-            // GENERATE PRINTF
-            if (parsing_opts && o_idx > 0) {
-                // User provided options: ${pi:.2f} or ${self.saldo:.2f}
-                // Check if var_buffer contains property access
-                char* dot_pos = strchr(var_buffer, '.');
-                char* actual_var = var_buffer;
-                char* prop_name = NULL;
-                
-                if (dot_pos != NULL) {
-                    *dot_pos = '\0';
-                    prop_name = dot_pos + 1;
-                    actual_var = var_buffer;
-                }
-                
-                // Build the expression to print
-                char expr_buffer[256] = {0};
-                if (prop_name != NULL) {
-                    if (strcmp(actual_var, "self") == 0) {
-                        snprintf(expr_buffer, sizeof(expr_buffer), "self->%s", prop_name);
-                    } else {
-                        snprintf(expr_buffer, sizeof(expr_buffer), "%s.%s", actual_var, prop_name);
-                    }
+            // Handle Property Access (self.x) inside expression
+            // We need to convert 'self.x' -> 'self->x' if 'self' is a pointer
+            char final_expr[256] = {0};
+            char* dot = strchr(expr_buffer, '.');
+            if (dot) {
+                *dot = '\0';
+                char* obj = expr_buffer;
+                char* prop = dot + 1;
+                if (strcmp(obj, "self") == 0) {
+                    snprintf(final_expr, 255, "self->%s", prop);
                 } else {
-                    snprintf(expr_buffer, sizeof(expr_buffer), "%s", var_buffer);
-                }
-                
-                // We ensure it starts with '%' for C printf
-                if (opt_buffer[0] != '%') {
-                    fprintf(file, "    printf(\"%%%s\", %s);\n", opt_buffer, expr_buffer);
-                } else {
-                    fprintf(file, "    printf(\"%s\", %s);\n", opt_buffer, expr_buffer);
+                    snprintf(final_expr, 255, "%s.%s", obj, prop);
                 }
             } else {
-                // No options: ${x} -> Use generic macro
-                // Check if this is a method call (e.g., m.len, arr.push)
-                char* dot_pos = strchr(var_buffer, '.');
-                if (dot_pos != NULL) {
-                    // Property access or method call: self.nome, arr.len, etc.
-                    *dot_pos = '\0'; // Split at '.'
-                    char* prop_or_method = dot_pos + 1;
-                    char* var_name = var_buffer;
-                    
-                    // Check if it's a known array method
-                    if (strcmp(prop_or_method, "len") == 0) {
-                        fprintf(file, "    printf(print_any(arrlen(%s)), arrlen(%s));\n", var_name, var_name);
-                    } else if (strcmp(var_name, "self") == 0) {
-                        // self.property -> self->property (self is a pointer in methods)
-                        fprintf(file, "    printf(print_any(self->%s), self->%s);\n", prop_or_method, prop_or_method);
-                    } else {
-                        // Regular property access: obj.property -> obj.property
-                        fprintf(file, "    printf(print_any(%s.%s), %s.%s);\n", var_name, prop_or_method, var_name, prop_or_method);
-                    }
-                } else {
-                    // Regular variable
-                    fprintf(file, "    printf(print_any(%s), %s);\n", var_buffer, var_buffer);
-                }
+                strcpy(final_expr, expr_buffer);
+            }
+
+            // Generate Append Code
+            if (parsing_fmt) {
+                // User provided format (e.g. .2f)
+                char final_fmt[64];
+                // If user wrote ".2f", we make it "%.2f"
+                if (fmt_buffer[0] == '%') snprintf(final_fmt, 64, "%s", fmt_buffer);
+                else snprintf(final_fmt, 64, "%%%s", fmt_buffer);
+                
+                fprintf(file, "_s = sdscatprintf(_s, \"%s\", %s); ", final_fmt, final_expr);
+            } else {
+                // Auto-detection using _Generic
+                // "print_any" returns the format string ("%d", "%f") based on type
+                fprintf(file, "_s = sdscatprintf(_s, print_any(%s), %s); ", final_expr, final_expr);
             }
         } 
-        // CASE B: Normal Text
+        // CASE B: Static Text
         else {
-            fprintf(file, "    printf(\"");
-            // Read until next '${' or end of string
+            // Optimization: Accumulate static text chunk
+            fprintf(file, "_s = sdscat(_s, \"");
             while (*cursor != '\0' && !starts_with(cursor, "${")) {
-                // Handle escaped chars
-                if (*cursor == '\\') {
-                    cursor++;
-                    switch (*cursor) {
-                        case 'n': fputc('\n', file); break;
-                        case 't': fputc('\t', file); break;
-                        case '\\': fputc('\\', file); break;
-                        case '"': fputc('"', file); break;
-                        default: fputc(*cursor, file); break;
-                    }
-                    if (*cursor != '\0') cursor++;
-                } else {
-                    // Escape special characters for printf
-                    if (*cursor == '%') {
-                        fputc('%', file); // Escape % as %%
-                    } else if (*cursor == '"') {
-                        fputc('\\', file);
-                        fputc('"', file);
-                    } else {
-                        fputc(*cursor, file);
-                    }
-                    cursor++;
-                }
+                // Escape C string characters
+                if (*cursor == '"') fprintf(file, "\\\"");
+                else if (*cursor == '\\') fprintf(file, "\\\\");
+                else if (*cursor == '\n') fprintf(file, "\\n");
+                else fputc(*cursor, file);
+                cursor++;
             }
-            fprintf(file, "\");\n");
+            fprintf(file, "\"); ");
         }
     }
+    
+    // 2. Return the string
+    fprintf(file, "_s; })");
 }
 
 void codegen_block(ASTNode *node, FILE *file)
@@ -387,6 +343,30 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
         fprintf(file, "    flush_input();\n");
         fprintf(file, "}\n\n");
+        
+        // --- CONVERSION HELPERS ---
+        fprintf(file, "// Primitives to String conversions\n");
+        fprintf(file, "sds int8_to_string(signed char x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int16_to_string(short x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int32_to_string(int x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int64_to_string(long long x) { return sdscatprintf(sdsempty(), \"%%lld\", x); }\n");
+        fprintf(file, "sds int_arq_to_string(long x) { return sdscatprintf(sdsempty(), \"%%ld\", x); }\n");
+        fprintf(file, "sds float32_to_string(float x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float64_to_string(double x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float_ext_to_string(long double x) { return sdscatprintf(sdsempty(), \"%%Lf\", x); }\n");
+        fprintf(file, "sds char_to_string(char* x) { return sdsnew(x); }\n"); // Copy
+        fprintf(file, "\n");
+
+        fprintf(file, "// String to Primitives conversions\n");
+        fprintf(file, "signed char string_to_int8(char* s) { return (signed char)atoi(s); }\n");
+        fprintf(file, "short string_to_int16(char* s) { return (short)atoi(s); }\n");
+        fprintf(file, "int string_to_int32(char* s) { return atoi(s); }\n");
+        fprintf(file, "long long string_to_int64(char* s) { return atoll(s); }\n");
+        fprintf(file, "long string_to_int_arq(char* s) { return atol(s); }\n");
+        fprintf(file, "float string_to_real32(char* s) { return (float)atof(s); }\n");
+        fprintf(file, "double string_to_real64(char* s) { return atof(s); }\n");
+        fprintf(file, "long double string_to_real_ext(char* s) { return (long double)atof(s); }\n");
+        fprintf(file, "\n");
         
         // Metadata
         fprintf(file, "const char* NOME_PROGRAMA = \"%s\";\n\n", node->name);
@@ -568,14 +548,13 @@ void codegen(ASTNode *node, FILE *file)
             } else if (init_node->type == NODE_LITERAL_STRING) {
                 // String literal initialization
                 if (is_texto) {
-                    // For texto, convert string literal to SDS
+                    // For texto, codegen_string_literal already returns an sds
                     // Check if it's an empty string
                     if (init_node->string_value && strlen(init_node->string_value) == 0) {
                         fprintf(file, "sdsempty()");
                     } else {
-                        fprintf(file, "sdsnew(");
+                        // codegen_string_literal returns sds directly (statement expression)
                         codegen(init_node, file);
-                        fprintf(file, ")");
                     }
                 } else {
                     codegen(init_node, file);
@@ -780,13 +759,14 @@ void codegen(ASTNode *node, FILE *file)
         // Special handling for 'escreval' -> 'printf'
         if (strcmp(node->name, "escreval") == 0)
         {
-            // Check if argument is a String Literal (candidate for interpolation)
+            // --- SIMPLE FIX FOR ESCREVAL ---
+            // If input is a literal string, we KNOW it's a string.
             if (arrlen(node->children) > 0 && node->children[0]->type == NODE_LITERAL_STRING) {
-                // Use our interpolation engine
+                fprintf(file, "    printf(\"%%s\\n\", ");
                 codegen_string_literal(node->children[0]->string_value, file);
-                fprintf(file, "    printf(\"\\n\");\n");
+                fprintf(file, ");\n");
             } else {
-                // Old generic fallback (vars, math, etc.)
+                // Generic variable printing
                 fprintf(file, "    printf(print_any(");
                 if (arrlen(node->children) > 0) {
                     codegen(node->children[0], file);
@@ -825,7 +805,7 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_LITERAL_STRING:
-        fprintf(file, "\"%s\"", node->string_value);
+        codegen_string_literal(node->string_value, file);
         break;
 
     case NODE_VAR_REF:
@@ -1088,34 +1068,128 @@ void codegen(ASTNode *node, FILE *file)
         // For now, we'll generate without indentation/semicolon and let the parent handle it
         const char* method = node->data_type ? node->data_type : "";
         
-        // Check if this is an extern module namespace call (e.g., mat.seno(x))
-        char* base_type = NULL;
-        if (node->name) {
-            base_type = scope_lookup(node->name);
-        } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
-            base_type = scope_lookup(node->children[0]->name);
-        }
+        // --- PRIMITIVE CONVERSIONS ---
         
-        int is_extern_module = (base_type && strcmp(base_type, "MODULE") == 0);
-        
-        if (is_extern_module) {
-            // Extern module namespace call: mat.seno(x) -> mat.seno(x)
+        // 1. .texto() -> Converts any primitive to sds
+        if (strcmp(method, "texto") == 0) {
+            fprintf(file, "_Generic((");
             if (node->name) {
-                fprintf(file, "%s.%s(", node->name, method);
-            } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
-                fprintf(file, "%s.%s(", node->children[0]->name, method);
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
             }
-            
-            // Print arguments (skip the first child which is the module object)
-            // When node->name exists, children[0] is the object, children[1+] are args
-            // When node->name is NULL, children[0] is the object, children[1+] are args
-            int arg_start = 1; // Always skip first child (the object)
-            for (int i = arg_start; i < arrlen(node->children); i++) {
-                if (i > arg_start) fprintf(file, ", ");
-                codegen(node->children[i], file);
+            fprintf(file, "), signed char: int8_to_string, short: int16_to_string, int: int32_to_string, long long: int64_to_string, long: int_arq_to_string, float: float32_to_string, double: float64_to_string, long double: float_ext_to_string, char*: char_to_string)(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
-        } else if (strcmp(method, "len") == 0) {
+        }
+        // 2. Integer conversion methods (explicit sizes)
+        else if (strcmp(method, "inteiro8") == 0) {
+            fprintf(file, "string_to_int8(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "inteiro16") == 0) {
+            fprintf(file, "string_to_int16(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "inteiro32") == 0) {
+            fprintf(file, "string_to_int32(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "inteiro64") == 0) {
+            fprintf(file, "string_to_int64(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "inteiro_arq") == 0) {
+            fprintf(file, "string_to_int_arq(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        // 3. Real conversion methods (explicit sizes)
+        else if (strcmp(method, "real32") == 0) {
+            fprintf(file, "string_to_real32(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "real64") == 0) {
+            fprintf(file, "string_to_real64(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        else if (strcmp(method, "real_ext") == 0) {
+            fprintf(file, "string_to_real_ext(");
+            if (node->name) {
+                fprintf(file, "%s", node->name);
+            } else if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ")");
+        }
+        // --- EXISTING LOGIC ---
+        else {
+            // Check if this is an extern module namespace call (e.g., mat.seno(x))
+            char* base_type = NULL;
+            if (node->name) {
+                base_type = scope_lookup(node->name);
+            } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
+                base_type = scope_lookup(node->children[0]->name);
+            }
+            
+            int is_extern_module = (base_type && strcmp(base_type, "MODULE") == 0);
+            
+            if (is_extern_module) {
+                // Extern module namespace call: mat.seno(x) -> mat.seno(x)
+                if (node->name) {
+                    fprintf(file, "%s.%s(", node->name, method);
+                } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
+                    fprintf(file, "%s.%s(", node->children[0]->name, method);
+                }
+                
+                // Print arguments (skip the first child which is the module object)
+                // When node->name exists, children[0] is the object, children[1+] are args
+                // When node->name is NULL, children[0] is the object, children[1+] are args
+                int arg_start = 1; // Always skip first child (the object)
+                for (int i = arg_start; i < arrlen(node->children); i++) {
+                    if (i > arg_start) fprintf(file, ", ");
+                    codegen(node->children[i], file);
+                }
+                fprintf(file, ")");
+            } else if (strcmp(method, "len") == 0) {
             // arr.len -> arrlen(arr)
             fprintf(file, "arrlen(");
             if (node->name) {
@@ -1149,25 +1223,26 @@ void codegen(ASTNode *node, FILE *file)
                 codegen(node->children[0], file);
             }
             fprintf(file, ")");
-        } else {
-            // Struct Method Call: p.mover(10) -> mover(&p, 10)
-            fprintf(file, "%s(&", method); // "mover(&"
-            
-            // Print the object (first child is the object)
-            if (node->name) {
-                fprintf(file, "%s", node->name);
-            } else if (arrlen(node->children) > 0) {
-                codegen(node->children[0], file);
+            } else {
+                // Struct Method Call: p.mover(10) -> mover(&p, 10)
+                fprintf(file, "%s(&", method); // "mover(&"
+                
+                // Print the object (first child is the object)
+                if (node->name) {
+                    fprintf(file, "%s", node->name);
+                } else if (arrlen(node->children) > 0) {
+                    codegen(node->children[0], file);
+                }
+                
+                // Print other arguments
+                // Note: children[0] is the object. Arguments start at index 1.
+                int arg_start_idx = 1;
+                for (int i = arg_start_idx; i < arrlen(node->children); i++) {
+                    fprintf(file, ", ");
+                    codegen(node->children[i], file);
+                }
+                fprintf(file, ")");
             }
-            
-            // Print other arguments
-            // Note: children[0] is the object. Arguments start at index 1.
-            int arg_start_idx = 1;
-            for (int i = arg_start_idx; i < arrlen(node->children); i++) {
-                fprintf(file, ", ");
-                codegen(node->children[i], file);
-            }
-            fprintf(file, ")");
         }
         break;
 
