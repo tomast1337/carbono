@@ -9,6 +9,8 @@ extern int debug_mode;
 // Column tracking
 int yycol = 1;
 
+#define YY_USER_ACTION yycol += yyleng;
+
 sds clean_str(const char* raw) {
     sds s = sdsnew(raw);
     sdsrange(s, 1, -2);
