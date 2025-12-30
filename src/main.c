@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <stdlib.h> // for system()
+#include <stdlib.h>
 #include <string.h>
 #include "ast.h"
 #include "symtable.h"
@@ -62,14 +62,12 @@ int main(int argc, char** argv) {
             print_ast(root_node);
         }
 
-        // 1. Open Output File
         FILE* out = fopen("output.c", "w");
         if (!out) {
             printf("Error: Could not create output.c\n");
             return 1;
         }
 
-        // 2. Generate C Code
         if (debug_mode) {
             printf("[DEBUG] Generating C code...\n");
         } else {
@@ -78,9 +76,14 @@ int main(int argc, char** argv) {
         codegen(root_node, out);
         fclose(out);
 
-        // 3. Compile with GCC (link sds.c for string input)
         printf("[Carbono] Compiling Native Binary...\n");
-        system("gcc output.c deps/sds.c -o program -I deps -Wall");
+        int compile_result = system("gcc output.c deps/sds.c -o program -I deps -Wall");
+        
+        if (compile_result != 0) {
+            fprintf(stderr, "\n[Carbono] Error: Compilation failed!\n");
+            fprintf(stderr, "Please check the error messages above for details.\n");
+            return 1;
+        }
         
         printf("[Carbono] Done! Run with ./program\n");
     }

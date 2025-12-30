@@ -6,6 +6,9 @@
 // External debug flag (set in main.c)
 extern int debug_mode;
 
+// Column tracking
+int yycol = 1;
+
 sds clean_str(const char* raw) {
     sds s = sdsnew(raw);
     sdsrange(s, 1, -2);
@@ -92,7 +95,9 @@ double parse_float(const char* txt) {
     return TOKEN_ID; 
 }
 
-[ \t\n\r]   { /* Ignore whitespace */ }
+[ \t]      { /* Ignore whitespace */ }
+\n         { yycol = 1; /* Reset column on newline */ }
+\r         { /* Ignore carriage return */ }
 
 .           { return yytext[0]; }
 

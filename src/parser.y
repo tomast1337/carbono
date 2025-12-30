@@ -1,14 +1,21 @@
 %{
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "ast.h"
 #include "symtable.h"
 
 extern int yylex();
 extern int yylineno;
-void yyerror(const char *s) { printf("Error (Line %d): %s\n", yylineno, s); }
+extern int yycol;
+extern FILE* yyin;
+
+void yyerror(const char *s);
 
 ASTNode* root_node = NULL;
 %}
+
+%define parse.error verbose
 
 %union {
     int integer;
@@ -31,6 +38,7 @@ ASTNode* root_node = NULL;
 %right '.'
 %nonassoc PROP_ACCESS
 %nonassoc METHOD_CALL
+%left '('
 
 /* Types for non-terminals */
 %type <node> program block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue
@@ -97,12 +105,12 @@ statements:
 
 statement:
     var_decl
-    | assign_stmt
-    | input_stmt
     | method_call {
-        /* Method call as statement: arr.len; or arr.push(x); */
+        /* Method call as statement: arr.push(x); - must come before assign_stmt */
         $$ = $1;
     }
+    | assign_stmt
+    | input_stmt
     | struct_def
     | TOKEN_ID '(' expr ')' {
          /* Function Call Stub */
@@ -208,7 +216,8 @@ lvalue:
         ast_add_child($$, $3); // Index expression
     }
     | TOKEN_ID '.' TOKEN_ID {
-        /* Property access as lvalue: p.x (for structs only) */
+        /* Property access as lvalue: p.x (for structs only, not method calls) */
+        /* Note: This only matches simple property access, not method calls */
         $$ = ast_new(NODE_PROP_ACCESS);
         $$->name = sdsnew($1);
         $$->data_type = sdsnew($3);
@@ -220,94 +229,106 @@ lvalue:
     ;
 
 if_stmt:
-    /* Matches: se ( x > 5 ) { ... } or se ( x < pi ) { ... } */
-    TOKEN_SE '(' TOKEN_ID '>' expr ')' block {
+    /* Matches: se ( expr > expr ) { ... } - supports expressions on both sides */
+    TOKEN_SE '(' expr '>' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;            // Left expression stored as child
         $$->data_type = sdsnew(">"); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $5);      // Right-hand expression
         ast_add_child($$, $7);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '<' expr ')' block {
+    | TOKEN_SE '(' expr '<' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("<"); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $5);      // Right-hand expression
         ast_add_child($$, $7);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '>' '=' expr ')' block {
+    | TOKEN_SE '(' expr '>' '=' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew(">="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '<' '=' expr ')' block {
+    | TOKEN_SE '(' expr '<' '=' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("<="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '=' '=' expr ')' block {
+    | TOKEN_SE '(' expr '=' '=' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("=="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '!' '=' expr ')' block {
+    | TOKEN_SE '(' expr '!' '=' expr ')' block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("!="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
     }
-    | TOKEN_SE '(' TOKEN_ID '>' expr ')' block TOKEN_SENAO block {
-        /* Matches: se ( x > 5 ) { ... } senao { ... } */
+    | TOKEN_SE '(' expr '>' expr ')' block TOKEN_SENAO block {
+        /* Matches: se ( expr > expr ) { ... } senao { ... } */
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew(">"); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $5);      // Right-hand expression
         ast_add_child($$, $7);      // If block
         ast_add_child($$, $9);      // Else block
     }
-    | TOKEN_SE '(' TOKEN_ID '<' expr ')' block TOKEN_SENAO block {
+    | TOKEN_SE '(' expr '<' expr ')' block TOKEN_SENAO block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("<"); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $5);      // Right-hand expression
         ast_add_child($$, $7);      // If block
         ast_add_child($$, $9);      // Else block
     }
-    | TOKEN_SE '(' TOKEN_ID '>' '=' expr ')' block TOKEN_SENAO block {
+    | TOKEN_SE '(' expr '>' '=' expr ')' block TOKEN_SENAO block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew(">="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
         ast_add_child($$, $10);     // Else block
     }
-    | TOKEN_SE '(' TOKEN_ID '<' '=' expr ')' block TOKEN_SENAO block {
+    | TOKEN_SE '(' expr '<' '=' expr ')' block TOKEN_SENAO block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("<="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
         ast_add_child($$, $10);     // Else block
     }
-    | TOKEN_SE '(' TOKEN_ID '=' '=' expr ')' block TOKEN_SENAO block {
+    | TOKEN_SE '(' expr '=' '=' expr ')' block TOKEN_SENAO block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("=="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
         ast_add_child($$, $10);     // Else block
     }
-    | TOKEN_SE '(' TOKEN_ID '!' '=' expr ')' block TOKEN_SENAO block {
+    | TOKEN_SE '(' expr '!' '=' expr ')' block TOKEN_SENAO block {
         $$ = ast_new(NODE_IF);
-        $$->name = sdsnew($3);      // Variable (x)
+        $$->name = NULL;
         $$->data_type = sdsnew("!="); // Operator
+        ast_add_child($$, $3);      // Left-hand expression
         ast_add_child($$, $6);      // Right-hand expression
         ast_add_child($$, $8);      // If block
         ast_add_child($$, $10);     // Else block
@@ -430,10 +451,12 @@ factor:
         ast_add_child($$, $1); // Base expression (could be another array access)
         ast_add_child($$, $3); // Index expression
     }
-    | prop_access {
+    | method_call {
+        /* Method calls must be checked before prop_access to avoid conflicts */
         $$ = $1;
     }
-    | method_call {
+    | prop_access {
+        /* Property access: p.x (only if not followed by '(') */
         $$ = $1;
     }
     | array_literal {
@@ -543,55 +566,98 @@ expr_list:
     ;
 
 prop_access:
-    factor '.' TOKEN_ID %prec PROP_ACCESS {
-        /* Property access: p.x (without parentheses) */
+    TOKEN_ID '.' TOKEN_ID {
+        /* Simple property access: arr.len or p.x (without parentheses) */
         $$ = ast_new(NODE_PROP_ACCESS);
-        if ($1->type == NODE_VAR_REF && $1->name) {
-            $$->name = sdsnew($1->name);
-        }
+        $$->name = sdsnew($1);
+        $$->data_type = sdsnew($3); // Property Name
+        ASTNode* obj = ast_new(NODE_VAR_REF);
+        obj->name = sdsnew($1);
+        ast_add_child($$, obj);      // Object
+    }
+    | factor '.' TOKEN_ID %prec PROP_ACCESS {
+        /* Complex property access: arr[0].len (without parentheses) */
+        $$ = ast_new(NODE_PROP_ACCESS);
+        $$->name = NULL;
         $$->data_type = sdsnew($3); // Property Name
         ast_add_child($$, $1);      // Object
     }
     ;
 
 method_call:
-    factor '.' TOKEN_ID '(' ')' {
-        /* Method call with no arguments: arr.pop() */
+    TOKEN_ID '.' TOKEN_ID '(' ')' {
+        /* Method call with no arguments: arr.pop() or p.mover() */
         $$ = ast_new(NODE_METHOD_CALL);
-        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
-            $$->name = sdsnew($1->name);
-        } else {
-            $$->name = NULL;
-        }
+        $$->name = sdsnew($1);
+        $$->data_type = sdsnew($3); // Method name
+        ASTNode* obj = ast_new(NODE_VAR_REF);
+        obj->name = sdsnew($1);
+        ast_add_child($$, obj); // Base expression
+    }
+    | TOKEN_ID '.' TOKEN_ID '(' expr ')' {
+        /* Method call with one argument: arr.push(x) or p.mover(10) */
+        $$ = ast_new(NODE_METHOD_CALL);
+        $$->name = sdsnew($1);
+        $$->data_type = sdsnew($3); // Method name
+        ASTNode* obj = ast_new(NODE_VAR_REF);
+        obj->name = sdsnew($1);
+        ast_add_child($$, obj); // Base expression
+        ast_add_child($$, $5); // Argument
+    }
+    | factor '.' TOKEN_ID '(' ')' {
+        /* Method call on complex expression: arr[0].pop() */
+        $$ = ast_new(NODE_METHOD_CALL);
+        $$->name = NULL;
         $$->data_type = sdsnew($3); // Method name
         ast_add_child($$, $1); // Base expression
     }
     | factor '.' TOKEN_ID '(' expr ')' {
-        /* Method call on expression with argument: arr.push(x) or arr[0].push(x) */
+        /* Method call on complex expression with argument: arr[0].push(x) */
         $$ = ast_new(NODE_METHOD_CALL);
-        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
-        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
-            $$->name = sdsnew($1->name);
-        } else {
-            $$->name = NULL; // Will be generated from child
-        }
+        $$->name = NULL;
         $$->data_type = sdsnew($3); // Method name
         ast_add_child($$, $1); // Base expression
         ast_add_child($$, $5); // Argument
     }
-    | factor '.' TOKEN_ID %prec METHOD_CALL {
-        /* Method call on expression: arr.len or arr[0].len (no parentheses) */
-        /* Note: This conflicts with prop_access, but we'll treat it as method_call for arrays */
-        $$ = ast_new(NODE_METHOD_CALL);
-        /* If the factor is a simple TOKEN_ID (NODE_VAR_REF), store name directly */
-        if ($1->type == NODE_VAR_REF && $1->name != NULL) {
-            $$->name = sdsnew($1->name);
-        } else {
-            $$->name = NULL; // Will be generated from child
-        }
-        $$->data_type = sdsnew($3); // Method name
-        ast_add_child($$, $1); // Base expression
-    }
     ;
 
 %%
+
+void yyerror(const char *msg) {
+    extern int yycol;
+    fprintf(stderr, "\033[1;31mError:\033[0m %s\n", msg);
+    fprintf(stderr, "   at line %d, column %d\n", yylineno, yycol);
+
+    if (yyin) {
+        // Save current position
+        long saved_pos = ftell(yyin);
+        
+        // Rewind to find the line content
+        fseek(yyin, 0, SEEK_SET);
+        int current_line = 1;
+        char buffer[1024];
+        
+        while (fgets(buffer, sizeof(buffer), yyin)) {
+            if (current_line == yylineno) {
+                // Print code snippet
+                fprintf(stderr, "   | \n");
+                fprintf(stderr, "%3d | %s", current_line, buffer);
+                if (buffer[strlen(buffer)-1] != '\n') fprintf(stderr, "\n"); // Handle EOF without newline
+                
+                // Print pointer caret
+                fprintf(stderr, "   | ");
+                for(int i=1; i<yycol; i++) fprintf(stderr, " ");
+                fprintf(stderr, "\033[1;33m^\033[0m\n");
+                fprintf(stderr, "   | \n");
+                break;
+            }
+            current_line++;
+        }
+        
+        // Restore position
+        fseek(yyin, saved_pos, SEEK_SET);
+    }
+    // Don't exit immediately if you want to try Panic Mode recovery, 
+    // but for now, fail fast is good.
+    exit(1); 
+}

@@ -234,6 +234,8 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
 void codegen_block(ASTNode *node, FILE *file)
 {
     fprintf(file, "{\n");
+    scope_enter(); // Push new scope for this block
+    
     for (int i = 0; i < arrlen(node->children); i++)
     {
         ASTNode* child = node->children[i];
@@ -246,6 +248,8 @@ void codegen_block(ASTNode *node, FILE *file)
             codegen(child, file);
         }
     }
+    
+    scope_exit(); // Pop scope when block ends
     fprintf(file, "}\n");
 }
 
@@ -511,25 +515,49 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_IF:
-        // se ( x op expr ) { ... } [senao { ... }]
-        // node->name is the left-hand variable
+        // se ( expr op expr ) { ... } [senao { ... }]
+        // node->name is NULL (or variable name for backward compatibility)
         // node->data_type is the operator (>, <, >=, <=, ==, !=)
-        // node->children[0] is the right-hand expression
-        // node->children[1] is the if block
-        // node->children[2] is the else block (if present)
+        // node->children[0] is the left-hand expression
+        // node->children[1] is the right-hand expression
+        // node->children[2] is the if block
+        // node->children[3] is the else block (if present)
         const char* op = node->data_type ? node->data_type : ">";
-        fprintf(file, "    if (%s %s ", node->name, op);
-        if (arrlen(node->children) > 0) {
-            codegen(node->children[0], file); // Right-hand expression
-        }
-        fprintf(file, ") ");
-        if (arrlen(node->children) > 1) {
-            codegen(node->children[1], file); // The if block
-        }
-        if (arrlen(node->children) > 2) {
-            // There's an else block
-            fprintf(file, " else ");
-            codegen(node->children[2], file); // The else block
+        
+        fprintf(file, "    if (");
+        
+        // Check if this is the old format (node->name exists) for backward compatibility
+        if (node->name != NULL) {
+            // Old format: se ( x > expr )
+            fprintf(file, "%s %s ", node->name, op);
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file); // Right-hand expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 1) {
+                codegen(node->children[1], file); // The if block
+            }
+            if (arrlen(node->children) > 2) {
+                fprintf(file, " else ");
+                codegen(node->children[2], file); // The else block
+            }
+        } else {
+            // New format: se ( expr > expr )
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file); // Left-hand expression
+            }
+            fprintf(file, " %s ", op);
+            if (arrlen(node->children) > 1) {
+                codegen(node->children[1], file); // Right-hand expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 2) {
+                codegen(node->children[2], file); // The if block
+            }
+            if (arrlen(node->children) > 3) {
+                fprintf(file, " else ");
+                codegen(node->children[3], file); // The else block
+            }
         }
         fprintf(file, "\n");
         break;
@@ -615,15 +643,48 @@ void codegen(ASTNode *node, FILE *file)
         // node->children[1] is right operand
         const char* bin_op = node->data_type ? node->data_type : "+";
         
-        fprintf(file, "(");
-        if (arrlen(node->children) > 0) {
-            codegen(node->children[0], file);
+        // Check if this is string concatenation (texto + texto or texto + string literal)
+        int is_string_concat = 0;
+        if (strcmp(bin_op, "+") == 0 && arrlen(node->children) >= 2) {
+            ASTNode* left = node->children[0];
+            ASTNode* right = node->children[1];
+            
+            // Check if left is a texto variable or string literal
+            int left_is_string = (left->type == NODE_LITERAL_STRING) ||
+                                 (left->type == NODE_VAR_REF && left->name && scope_lookup(left->name) && strcmp(map_type(scope_lookup(left->name)), "char*") == 0);
+            
+            // Check if right is a string literal
+            int right_is_string = (right->type == NODE_LITERAL_STRING) ||
+                                  (right->type == NODE_VAR_REF && right->name && scope_lookup(right->name) && strcmp(map_type(scope_lookup(right->name)), "char*") == 0);
+            
+            if (left_is_string || right_is_string) {
+                is_string_concat = 1;
+            }
         }
-        fprintf(file, " %s ", bin_op);
-        if (arrlen(node->children) > 1) {
-            codegen(node->children[1], file);
+        
+        if (is_string_concat) {
+            // String concatenation: use sdscat()
+            fprintf(file, "sdscat(");
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, ", ");
+            if (arrlen(node->children) > 1) {
+                codegen(node->children[1], file);
+            }
+            fprintf(file, ")");
+        } else {
+            // Regular arithmetic operations
+            fprintf(file, "(");
+            if (arrlen(node->children) > 0) {
+                codegen(node->children[0], file);
+            }
+            fprintf(file, " %s ", bin_op);
+            if (arrlen(node->children) > 1) {
+                codegen(node->children[1], file);
+            }
+            fprintf(file, ")");
         }
-        fprintf(file, ")");
         break;
 
     case NODE_INFINITO:
@@ -823,13 +884,24 @@ void codegen(ASTNode *node, FILE *file)
             }
             fprintf(file, ")");
         } else {
-            // Unknown method
+            // Struct Method Call: p.mover(10) -> mover(&p, 10)
+            fprintf(file, "%s(&", method); // "mover(&"
+            
+            // Print the object (first child is the object)
             if (node->name) {
                 fprintf(file, "%s", node->name);
             } else if (arrlen(node->children) > 0) {
                 codegen(node->children[0], file);
             }
-            fprintf(file, ".%s", method);
+            
+            // Print other arguments
+            // Note: children[0] is the object. Arguments start at index 1.
+            int arg_start_idx = 1;
+            for (int i = arg_start_idx; i < arrlen(node->children); i++) {
+                fprintf(file, ", ");
+                codegen(node->children[i], file);
+            }
+            fprintf(file, ")");
         }
         break;
 
