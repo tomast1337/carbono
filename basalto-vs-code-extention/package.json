@@ -6,7 +6,7 @@
   "engines": {
     "vscode": "^1.107.0"
   },
-  "icon": "icon.png",
+  "repository": "https://github.com/tomast1337/basalto",
   "categories": [
     "Programming Languages"
   ],
