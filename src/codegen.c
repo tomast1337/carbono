@@ -1096,10 +1096,22 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, " ");
         
         // Body (Last child)
-        // Note: The body is a NODE_BLOCK. codegen_block handles scope_enter/exit.
-        // BUT: We need to register parameters in that scope!
+        // IMPORTANT: The body is a NODE_BLOCK, but we manually unwrap it here.
+        // 
+        // Why manual unwrapping instead of calling codegen(body)?
+        // - We need to inject function parameters into the function's scope
+        // - If we called codegen(body), it would call codegen_block() which would:
+        //   1. Print another '{' (double braces: {{ ... }})
+        //   2. Enter a NEW scope (parameters wouldn't be in that scope)
+        // 
+        // By manually iterating body->children, we:
+        // - Print the function's '{' once
+        // - Enter the function scope and register parameters
+        // - Generate each statement directly (no extra block wrapper)
+        // - Nested blocks (in if/while/etc) still work correctly because
+        //   those statements call codegen() on their block children, which
+        //   properly handles nested scopes and braces
         
-        // Manual block generation to inject params into scope
         int total_children = arrlen(node->children);
         if (total_children == 0) {
             // No body (shouldn't happen, but handle gracefully)
@@ -1118,7 +1130,7 @@ void codegen(ASTNode *node, FILE *file)
             scope_bind(p->name, p->data_type);
         }
         
-        // 2. Generate Body Children
+        // 2. Generate Body Children (manually unwrap the block)
         if (body && body->children) {
             for(int i=0; i<arrlen(body->children); i++) {
                  ASTNode* child = body->children[i];
