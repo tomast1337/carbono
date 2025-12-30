@@ -5,6 +5,7 @@ build/
 # The bootstrap builder executable
 nob
 nob.exe
+nob.old
 
 # --- Temporary Object Files (Safety Net) ---
 # In case you manually compile something outside the build dir
