@@ -120,14 +120,16 @@ void codegen(ASTNode *node, FILE *file);
 
 // Helper to generate function signatures (e.g. "int sum(int a, int b)")
 void codegen_func_signature(ASTNode* node, FILE* file) {
-    // If return type is a struct, check if it should be a pointer
-    // Heuristic: struct-returning functions often return pointers
+    // If return type is a struct, make it a pointer by default
+    // Heuristic: struct-returning functions often return pointers (especially with recursive structs)
     const char* return_type = map_type(node->data_type);
-    if (is_struct_type(node->data_type)) {
-        // Check if function body has return statements that return pointers
-        // For prototypes, we can't check, so we'll use a heuristic
-        // For definitions, we could check, but prototypes are generated first
-        // For now, make struct return types pointers by default
+    // Check if it's a struct type: either is_struct_type returns true, or map_type returned the same string
+    int is_struct = is_struct_type(node->data_type);
+    if (!is_struct && node->data_type && strcmp(return_type, node->data_type) == 0) {
+        // map_type returned the same string, which means it's likely a struct type
+        is_struct = 1;
+    }
+    if (is_struct) {
         fprintf(file, "%s* %s(", return_type, node->name);
     } else {
         fprintf(file, "%s %s(", return_type, node->name);
