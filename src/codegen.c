@@ -123,10 +123,16 @@ void codegen_func_signature(ASTNode* node, FILE* file) {
     // If return type is a struct, make it a pointer by default
     // Heuristic: struct-returning functions often return pointers (especially with recursive structs)
     const char* return_type = map_type(node->data_type);
-    // Check if it's a struct type: either is_struct_type returns true, or map_type returned the same string
-    int is_struct = is_struct_type(node->data_type);
-    if (!is_struct && node->data_type && strcmp(return_type, node->data_type) == 0) {
-        // map_type returned the same string, which means it's likely a struct type
+    // Check if it's a struct type by checking the type registry directly
+    int is_struct = 0;
+    if (node->data_type && type_registry) {
+        FieldEntry *fields = shget(type_registry, node->data_type);
+        if (fields != NULL) {
+            is_struct = 1;
+        }
+    }
+    // Also check if map_type returned the same string (fallback)
+    if (!is_struct && node->data_type && return_type && strcmp(return_type, node->data_type) == 0 && strcmp(return_type, "void") != 0) {
         is_struct = 1;
     }
     if (is_struct) {
@@ -1673,7 +1679,7 @@ void codegen(ASTNode *node, FILE *file)
         //   those statements call codegen() on their block children, which
         //   properly handles nested scopes and braces
         
-        ASTNode* body = node->children[total_children - 1];
+        // body is already set above
         fprintf(file, "{\n");
         scope_enter(); // Function Scope
         
