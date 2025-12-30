@@ -15,10 +15,7 @@ programa "EntradaSaida" {
     escreval("Voce e programador? (s/n)");
     var resp: texto = ler();
     
-    var is_dev: booleano = 0; // 0 = false
-    se (resp == "s") {
-        is_dev = 1; // 1 = true
-    }
+    garantir(resp == "s", "Apenas Desevolvedores Aceitos" );
     
     escreval("Ola ${nome}, com ${idade} ano(s)");
     
