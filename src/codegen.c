@@ -155,11 +155,16 @@ void codegen_func_signature(ASTNode* node, FILE* file) {
         ASTNode* param = node->children[i];
         if (i > 0) fprintf(file, ", ");
         
-        // METHOD LOGIC: If param is named "self", make it a pointer
-        if (strcmp(param->name, "self") == 0) {
-            fprintf(file, "%s* self", map_type(param->data_type));
+        const char* type = param->data_type;
+        const char* name = param->name;
+        
+        // SMART POINTER LOGIC:
+        // 1. If param name is "eu" or "self" -> Pointer
+        // 2. If param type is a Struct -> Pointer (Pass by Reference)
+        if ((name && (strcmp(name, "eu") == 0 || strcmp(name, "self") == 0)) || is_struct_type(type)) {
+            fprintf(file, "%s* %s", map_type(type), name);
         } else {
-            fprintf(file, "%s %s", map_type(param->data_type), param->name);
+            fprintf(file, "%s %s", map_type(type), name);
         }
     }
     fprintf(file, ")");
@@ -237,8 +242,8 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
                 *dot = '\0';
                 char* obj = expr_buffer;
                 char* prop = dot + 1;
-                if (strcmp(obj, "self") == 0) {
-                    snprintf(final_expr, 255, "self->%s", prop);
+                if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0) {
+                    snprintf(final_expr, 255, "%s->%s", obj, prop);
                 } else {
                     // Check if obj is a pointer type in symbol table
                     char* var_type = scope_lookup(obj);
@@ -731,19 +736,39 @@ void codegen(ASTNode *node, FILE *file)
                 ASTNode* prop_obj = init_node->children[0];
                 const char* prop_name = init_node->data_type ? init_node->data_type : "";
                 
-                // Special case: if accessing property on 'self', it's always a pointer access
-                if (prop_obj->type == NODE_VAR_REF && prop_obj->name && strcmp(prop_obj->name, "self") == 0) {
+                // Special case: if accessing property on 'self' or 'eu', check if field is a struct
+                if (prop_obj->type == NODE_VAR_REF && prop_obj->name && 
+                    (strcmp(prop_obj->name, "self") == 0 || strcmp(prop_obj->name, "eu") == 0)) {
                     // self->field where field is a struct type -> pointer
                     // We need to get the type of 'self' to look up the field
                     // 'self' is a parameter, so it should be in the current scope
-                    char* parent_type = scope_lookup("self");
+                    char* parent_type = scope_lookup(prop_obj->name);
                     if (parent_type) {
+                        // Remove '*' suffix if present (self is stored as "Tree*")
                         char* base_type = get_base_type(parent_type);
-                        if (!base_type) base_type = parent_type;
+                        if (!base_type) {
+                            // Check if it ends with '*'
+                            size_t len = strlen(parent_type);
+                            if (len > 0 && parent_type[len - 1] == '*') {
+                                static char base[256];
+                                strncpy(base, parent_type, len - 1);
+                                base[len - 1] = '\0';
+                                base_type = base;
+                            } else {
+                                base_type = parent_type;
+                            }
+                        }
                         char* field_type = lookup_field_type(base_type, prop_name);
                         if (field_type && is_struct_type(field_type)) {
                             needs_pointer_type = 1;
+                        } else if (is_struct_type(node->data_type)) {
+                            // Heuristic: if variable type is a struct and we're accessing self->field,
+                            // assume it's a pointer (common pattern for recursive structs)
+                            needs_pointer_type = 1;
                         }
+                    } else if (is_struct_type(node->data_type)) {
+                        // Fallback: if variable type is struct and accessing self/eu->field, assume pointer
+                        needs_pointer_type = 1;
                     }
                 } else if (prop_obj->type == NODE_VAR_REF && prop_obj->name) {
                     // Look up the parent struct type
@@ -942,15 +967,37 @@ void codegen(ASTNode *node, FILE *file)
                             // Look up the parent struct type
                             char* parent_type = scope_lookup(prop_obj->name);
                             if (parent_type) {
-                                // Get base type (removes array brackets if present)
+                                // Get base type (removes array brackets and '*' suffix if present)
                                 char* base_type = get_base_type(parent_type);
-                                if (!base_type) base_type = parent_type; // Fallback if get_base_type fails
+                                if (!base_type) {
+                                    // Check if it ends with '*'
+                                    size_t len = strlen(parent_type);
+                                    if (len > 0 && parent_type[len - 1] == '*') {
+                                        static char base[256];
+                                        strncpy(base, parent_type, len - 1);
+                                        base[len - 1] = '\0';
+                                        base_type = base;
+                                    } else {
+                                        base_type = parent_type;
+                                    }
+                                } else {
+                                    // get_base_type might have returned something with '*', remove it
+                                    size_t len = strlen(base_type);
+                                    if (len > 0 && base_type[len - 1] == '*') {
+                                        base_type[len - 1] = '\0';
+                                    }
+                                }
                                 // Look up the field type
                                 char* field_type = lookup_field_type(base_type, prop_name);
                                 if (field_type && is_struct_type(field_type)) {
                                     // The field is a struct type (pointer), check if value is a struct
                                     char* value_type = scope_lookup(value_node->name);
                                     if (value_type) {
+                                        // Remove '*' if present
+                                        size_t vlen = strlen(value_type);
+                                        if (vlen > 0 && value_type[vlen - 1] == '*') {
+                                            value_type[vlen - 1] = '\0';
+                                        }
                                         char* value_base = get_base_type(value_type);
                                         if (!value_base) value_base = value_type; // Fallback
                                         if (is_struct_type(value_base)) {
@@ -1404,8 +1451,9 @@ void codegen(ASTNode *node, FILE *file)
                 // The operator depends on whether the OBJECT is a pointer, not the field type
                 int is_pointer = 0;
                 
-                // Case 1: 'self' is always a pointer
-                if (obj->type == NODE_VAR_REF && obj->name && strcmp(obj->name, "self") == 0) {
+                // Case 1: 'self' or 'eu' is always a pointer
+                if (obj->type == NODE_VAR_REF && obj->name && 
+                    (strcmp(obj->name, "self") == 0 || strcmp(obj->name, "eu") == 0)) {
                     is_pointer = 1;
                 }
                 // Case 2: If obj is a property access (nested), check if the previous access returned a pointer
@@ -1683,11 +1731,22 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "{\n");
         scope_enter(); // Function Scope
         
-        // 1. Register Parameters in Symbol Table
+        // 1. Register Parameters in Symbol Table with Smart Pointer Logic
         int param_count = total_children - 1;
         for(int i=0; i<param_count; i++) {
             ASTNode* p = node->children[i];
-            scope_bind(p->name, p->data_type);
+            const char* type = p->data_type;
+            const char* name = p->name;
+            
+            // If param is struct or "eu"/"self", bind as pointer type in symbol table
+            if ((name && (strcmp(name, "eu") == 0 || strcmp(name, "self") == 0)) || is_struct_type(type)) {
+                // It is a pointer in C! Bind as "Type*"
+                char ptr_type[256];
+                snprintf(ptr_type, sizeof(ptr_type), "%s*", type);
+                scope_bind(name, ptr_type);
+            } else {
+                scope_bind(name, type);
+            }
         }
         
         // 2. Generate Body Children (manually unwrap the block)
