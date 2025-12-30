@@ -1,0 +1,10 @@
+biblioteca "Matematica" {
+    
+    // This code runs when loaded!
+    escreval("--- Inicializando Modulo de Matematica ---");
+
+    funcao dobrar(x: inteiro32): inteiro32 {
+        retorne x * 2;
+    }
+}
+
