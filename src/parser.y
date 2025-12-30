@@ -31,7 +31,7 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_BIBLIOTECA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
-%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE
+%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW
 
 %left '+' '-'
 %left '*' '/'
@@ -539,6 +539,15 @@ factor:
     | TOKEN_LER '(' ')' {
         /* Expression: var x = ler() */
         $$ = ast_new(NODE_INPUT_VALUE);
+    }
+    | TOKEN_NULL {
+        /* Null literal: nulo or NULL */
+        $$ = ast_new(NODE_LITERAL_NULL);
+    }
+    | TOKEN_NEW TOKEN_ID {
+        /* Heap allocation: nova Node */
+        $$ = ast_new(NODE_NEW);
+        $$->data_type = sdsnew($2);
     }
     | TOKEN_ID '(' expr ')' {
         /* Function call as expression: formatar_texto("...") */

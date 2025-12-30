@@ -66,6 +66,9 @@ double parse_float(const char* txt) {
 "estrutura" { if (debug_mode) printf("[LEX] TOKEN_ESTRUTURA\n"); return TOKEN_ESTRUTURA; }
 "garantir"  { if (debug_mode) printf("[LEX] TOKEN_ASSERT\n"); return TOKEN_ASSERT; }
 "retorne"   { if (debug_mode) printf("[LEX] TOKEN_RETORNE\n"); return TOKEN_RETORNE; }
+"nulo"      { if (debug_mode) printf("[LEX] TOKEN_NULL\n"); return TOKEN_NULL; }
+"NULL"      { if (debug_mode) printf("[LEX] TOKEN_NULL\n"); return TOKEN_NULL; }
+"nova"      { if (debug_mode) printf("[LEX] TOKEN_NEW\n"); return TOKEN_NEW; }
 
 ";"         { return TOKEN_SEMICOLON; }
 \.\.        { return TOKEN_DOTDOT; } /* Range Operator 0..10 */

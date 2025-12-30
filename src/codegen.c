@@ -234,6 +234,14 @@ static void codegen_string_literal(const char* raw_str, FILE* file) {
             }
             if (*cursor == '}') cursor++;
             
+            // Replace 'nulo' with 'NULL' in expr_buffer first
+            char* nulo_pos = strstr(expr_buffer, "nulo");
+            while (nulo_pos) {
+                // Replace "nulo" (4 chars) with "NULL" (4 chars) - same length, easy!
+                memcpy(nulo_pos, "NULL", 4);
+                nulo_pos = strstr(nulo_pos + 4, "nulo");
+            }
+            
             // Handle Property Access (self.x or var.field) inside expression
             // We need to convert to '->' if the object is a pointer
             char final_expr[256] = {0};
@@ -722,78 +730,14 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_VAR_DECL:
-        // var x: type = val -> int x = val; or var x: type -> int x;
+        // REFERENCE SEMANTICS: Structs are always pointers
         const char* var_type = map_type(node->data_type);
         int is_texto = (strcmp(var_type, "char*") == 0);
-        
-        // Check if initializer is a property access that returns a struct pointer
-        // If so, we need to declare the variable as a pointer type
-        int needs_pointer_type = 0;
-        if (arrlen(node->children) > 0) {
-            ASTNode* init_node = node->children[0];
-            if (init_node->type == NODE_PROP_ACCESS) {
-                // Property access - check if it returns a struct type (pointer)
-                ASTNode* prop_obj = init_node->children[0];
-                const char* prop_name = init_node->data_type ? init_node->data_type : "";
-                
-                // Special case: if accessing property on 'self' or 'eu', check if field is a struct
-                if (prop_obj->type == NODE_VAR_REF && prop_obj->name && 
-                    (strcmp(prop_obj->name, "self") == 0 || strcmp(prop_obj->name, "eu") == 0)) {
-                    // self->field where field is a struct type -> pointer
-                    // We need to get the type of 'self' to look up the field
-                    // 'self' is a parameter, so it should be in the current scope
-                    char* parent_type = scope_lookup(prop_obj->name);
-                    if (parent_type) {
-                        // Remove '*' suffix if present (self is stored as "Tree*")
-                        char* base_type = get_base_type(parent_type);
-                        if (!base_type) {
-                            // Check if it ends with '*'
-                            size_t len = strlen(parent_type);
-                            if (len > 0 && parent_type[len - 1] == '*') {
-                                static char base[256];
-                                strncpy(base, parent_type, len - 1);
-                                base[len - 1] = '\0';
-                                base_type = base;
-                            } else {
-                                base_type = parent_type;
-                            }
-                        }
-                        char* field_type = lookup_field_type(base_type, prop_name);
-                        if (field_type && is_struct_type(field_type)) {
-                            needs_pointer_type = 1;
-                        } else if (is_struct_type(node->data_type)) {
-                            // Heuristic: if variable type is a struct and we're accessing self->field,
-                            // assume it's a pointer (common pattern for recursive structs)
-                            needs_pointer_type = 1;
-                        }
-                    } else if (is_struct_type(node->data_type)) {
-                        // Fallback: if variable type is struct and accessing self/eu->field, assume pointer
-                        needs_pointer_type = 1;
-                    }
-                } else if (prop_obj->type == NODE_VAR_REF && prop_obj->name) {
-                    // Look up the parent struct type
-                    char* parent_type = scope_lookup(prop_obj->name);
-                    if (parent_type) {
-                        char* base_type = get_base_type(parent_type);
-                        if (!base_type) base_type = parent_type;
-                        // Look up the field type
-                        char* field_type = lookup_field_type(base_type, prop_name);
-                        if (field_type && is_struct_type(field_type)) {
-                            // The field is a struct type (pointer), so initializer returns a pointer
-                            needs_pointer_type = 1;
-                        }
-                    }
-                } else if (prop_obj->type == NODE_PROP_ACCESS) {
-                    // Nested property access - definitely returns a struct pointer
-                    needs_pointer_type = 1;
-                }
-            }
-        }
+        int is_struct = is_struct_type(node->data_type);
         
         // Register variable in symbol table
-        // If it's a pointer type, append "*" to the type name for tracking
-        if (needs_pointer_type && is_struct_type(node->data_type)) {
-            // Store with "*" suffix to indicate it's a pointer in C
+        if (is_struct) {
+            // Struct: Always a pointer. Store with "*" suffix for tracking
             char ptr_type[256];
             snprintf(ptr_type, sizeof(ptr_type), "%s*", node->data_type);
             scope_bind(node->name, ptr_type);
@@ -804,20 +748,27 @@ void codegen(ASTNode *node, FILE *file)
         if (is_texto) {
             // For texto (char*), use sds type
             fprintf(file, "    sds %s", node->name);
-        } else {
-            // If initializer is a struct pointer, declare variable as pointer
-            if (needs_pointer_type && is_struct_type(node->data_type)) {
-                fprintf(file, "    %s* %s", var_type, node->name);
+        } else if (is_struct) {
+            // Struct: ALWAYS a pointer. Initialize to NULL if no value.
+            fprintf(file, "    %s* %s", var_type, node->name);
+            if (arrlen(node->children) > 0) {
+                fprintf(file, " = ");
             } else {
-                fprintf(file, "    %s %s", var_type, node->name);
+                fprintf(file, " = NULL"); // Safe default for struct pointers
+            }
+        } else {
+            // Primitive: Standard logic
+            fprintf(file, "    %s %s", var_type, node->name);
+            if (arrlen(node->children) > 0) {
+                fprintf(file, " = ");
+            } else {
+                fprintf(file, ";\n");
+                return;
             }
         }
         
-        // Check if there's an initializer
-        if (arrlen(node->children) > 0) {
-            fprintf(file, " = ");
-        } else {
-            // No initializer, just declare the variable
+        // Check if there's an initializer (for structs, we already handled it above)
+        if (is_struct && arrlen(node->children) == 0) {
             fprintf(file, ";\n");
             return;
         }
@@ -993,31 +944,31 @@ void codegen(ASTNode *node, FILE *file)
                                     // The field is a struct type (pointer), check if value is a struct
                                     char* value_type = scope_lookup(value_node->name);
                                     if (value_type) {
-                                        // Remove '*' if present
+                                        // REFERENCE SEMANTICS: If value_type ends with '*', it's already a pointer
                                         size_t vlen = strlen(value_type);
                                         if (vlen > 0 && value_type[vlen - 1] == '*') {
-                                            value_type[vlen - 1] = '\0';
-                                        }
-                                        char* value_base = get_base_type(value_type);
-                                        if (!value_base) value_base = value_type; // Fallback
-                                        if (is_struct_type(value_base)) {
-                                            // Assigning struct value to struct pointer field -> need &
-                                            needs_address = 1;
+                                            // Already a pointer, don't add &
+                                            needs_address = 0;
+                                        } else {
+                                            // Remove '*' if present to get base type
+                                            char* value_base = get_base_type(value_type);
+                                            if (!value_base) value_base = value_type; // Fallback
+                                            if (is_struct_type(value_base)) {
+                                                // REFERENCE SEMANTICS: Structs are always pointers
+                                                // But if it's stored without '*', it means it's a stack variable
+                                                // Actually, with reference semantics, all struct vars are pointers
+                                                // So we should never need & here
+                                                needs_address = 0;
+                                            }
                                         }
                                     }
                                 }
                             }
                         } else if (prop_obj->type == NODE_PROP_ACCESS) {
                             // Nested property access - the field is definitely a struct pointer
-                            // Check if value is a struct
-                            char* value_type = scope_lookup(value_node->name);
-                            if (value_type) {
-                                char* value_base = get_base_type(value_type);
-                                if (!value_base) value_base = value_type; // Fallback
-                                if (is_struct_type(value_base)) {
-                                    needs_address = 1;
-                                }
-                            }
+                            // REFERENCE SEMANTICS: With reference semantics, struct vars are already pointers
+                            // So we don't need to add &
+                            needs_address = 0;
                         }
                     }
                     
@@ -1192,6 +1143,16 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_LITERAL_STRING:
         codegen_string_literal(node->string_value, file);
+        break;
+
+    case NODE_LITERAL_NULL:
+        fprintf(file, "NULL");
+        break;
+
+    case NODE_NEW:
+        // nova Node -> (Node*)calloc(1, sizeof(Node))
+        // calloc is better than malloc because it zeros memory (sets fields to NULL)
+        fprintf(file, "(%s*)calloc(1, sizeof(%s))", node->data_type, node->data_type);
         break;
 
     case NODE_VAR_REF:
@@ -1472,6 +1433,16 @@ void codegen(ASTNode *node, FILE *file)
                         size_t len = strlen(var_type);
                         if (len > 0 && var_type[len - 1] == '*') {
                             is_pointer = 1;
+                        } else {
+                            // REFERENCE SEMANTICS: If base type (without *) is a struct, it's always a pointer
+                            // Remove '*' if present to get base type
+                            char* base_type = var_type;
+                            if (len > 0 && var_type[len - 1] == '*') {
+                                base_type[len - 1] = '\0';
+                            }
+                            if (is_struct_type(base_type)) {
+                                is_pointer = 1;
+                            }
                         }
                     }
                 }
@@ -1649,10 +1620,39 @@ void codegen(ASTNode *node, FILE *file)
             }
             fprintf(file, ")");
             } else {
-                // Struct Method Call: p.mover(10) -> mover(&p, 10)
-                fprintf(file, "%s(&", method); // "mover(&"
+                // Struct Method Call: p.mover(10) -> mover(&p, 10) or mover(p, 10) if p is already a pointer
+                fprintf(file, "%s(", method);
+                
+                // Check if object is already a pointer (REFERENCE SEMANTICS)
+                int obj_is_pointer = 0;
+                if (node->name) {
+                    char* obj_type = scope_lookup(node->name);
+                    if (obj_type) {
+                        size_t len = strlen(obj_type);
+                        if (len > 0 && obj_type[len - 1] == '*') {
+                            obj_is_pointer = 1;
+                        } else if (is_struct_type(obj_type)) {
+                            // REFERENCE SEMANTICS: Structs are always pointers
+                            obj_is_pointer = 1;
+                        }
+                    }
+                } else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF) {
+                    char* obj_type = scope_lookup(node->children[0]->name);
+                    if (obj_type) {
+                        size_t len = strlen(obj_type);
+                        if (len > 0 && obj_type[len - 1] == '*') {
+                            obj_is_pointer = 1;
+                        } else if (is_struct_type(obj_type)) {
+                            // REFERENCE SEMANTICS: Structs are always pointers
+                            obj_is_pointer = 1;
+                        }
+                    }
+                }
                 
                 // Print the object (first child is the object)
+                if (!obj_is_pointer) {
+                    fprintf(file, "&"); // Take address only if not already a pointer
+                }
                 if (node->name) {
                     fprintf(file, "%s", node->name);
                 } else if (arrlen(node->children) > 0) {

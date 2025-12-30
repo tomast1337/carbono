@@ -34,7 +34,9 @@ typedef enum {
     NODE_ASSERT,       // garantir(condição, "Mensagem")
     NODE_FUNC_DEF,     // funcao soma(...) { ... }
     NODE_RETURN,       // retorne x;
-    NODE_EXTERN_BLOCK  // externo math "lib.so" { ... }
+    NODE_EXTERN_BLOCK, // externo math "lib.so" { ... }
+    NODE_LITERAL_NULL, // nulo
+    NODE_NEW           // nova Node
 } NodeType;
 
 typedef struct ASTNode {
