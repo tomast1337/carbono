@@ -363,44 +363,99 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
             }
             else
             {
-                // Find last . or -> before any [
-                char *last_dot = strrchr(expr_buffer, '.');
-                char *last_arrow = strrchr(expr_buffer, '>');
-                char *last_bracket = strrchr(expr_buffer, ']');
+                // Find first [ to detect array access
+                char *first_bracket = strchr(expr_buffer, '[');
                 
-                // Check if we have array access followed by property access
-                // e.g., p->filhos[i].nome
-                if (last_bracket && (last_dot || last_arrow))
+                // Check if we have property access followed by array access
+                // e.g., p.filhos[i] -> p->filhos[i]
+                if (first_bracket)
                 {
-                    // Determine which operator was used
-                    char *prop_op = NULL;
-                    if (last_arrow && (!last_dot || last_arrow > last_dot))
+                    // Find the last . before the first [
+                    char *dot_before_bracket = NULL;
+                    for (char *p = expr_buffer; p < first_bracket; p++)
                     {
-                        prop_op = last_arrow - 1; // Points to '-'
-                        if (*prop_op == '-' && last_arrow > expr_buffer && last_arrow[-1] == '-')
+                        if (*p == '.')
                         {
-                            // Found -> operator
-                            *prop_op = '\0'; // Terminate before ->
-                            char *obj = expr_buffer;
-                            char *prop = last_arrow + 1;
-                            snprintf(final_expr, 255, "%s->%s", obj, prop);
+                            dot_before_bracket = p;
                         }
                     }
-                    else if (last_dot)
+                    
+                    if (dot_before_bracket)
                     {
-                        // Array access with . operator: use -> for struct arrays
-                        *last_dot = '\0';
+                        // Property access before array access: convert . to ->
+                        *dot_before_bracket = '\0';
                         char *obj = expr_buffer;
-                        char *prop = last_dot + 1;
-                        snprintf(final_expr, 255, "%s->%s", obj, prop);
+                        char *rest = dot_before_bracket + 1; // This includes the property name and [i]
+                        
+                        if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
+                        {
+                            snprintf(final_expr, 255, "%s->%s", obj, rest);
+                        }
+                        else
+                        {
+                            // Check if obj is a pointer type in symbol table
+                            char *var_type = scope_lookup(obj);
+                            int is_ptr = 0;
+                            if (var_type)
+                            {
+                                size_t len = strlen(var_type);
+                                if (len > 0 && var_type[len - 1] == '*')
+                                {
+                                    is_ptr = 1;
+                                }
+                                else if (is_struct_type(var_type))
+                                {
+                                    // REFERENCE SEMANTICS: Structs are always pointers
+                                    is_ptr = 1;
+                                }
+                            }
+                            if (is_ptr)
+                            {
+                                snprintf(final_expr, 255, "%s->%s", obj, rest);
+                            }
+                            else
+                            {
+                                snprintf(final_expr, 255, "%s.%s", obj, rest);
+                            }
+                        }
                     }
                     else
                     {
-                        strcpy(final_expr, expr_buffer);
+                        // No dot before bracket - check for array access followed by property access
+                        // Simple approach: find any ']' and check if there's a '.' after it
+                        char *bracket = first_bracket;
+                        char *dot_after_bracket = NULL;
+                        while (*bracket != '\0')
+                        {
+                            if (*bracket == ']')
+                            {
+                                char *dot = strchr(bracket + 1, '.');
+                                if (dot && (!dot_after_bracket || dot < dot_after_bracket))
+                                {
+                                    dot_after_bracket = dot;
+                                }
+                            }
+                            bracket++;
+                        }
+                        
+                        if (dot_after_bracket)
+                        {
+                            // Array access followed by property access: p->filhos[i].nome -> p->filhos[i]->nome
+                            // Arrays of structs return pointers, so always use ->
+                            *dot_after_bracket = '\0';
+                            char *obj = expr_buffer;
+                            char *prop = dot_after_bracket + 1;
+                            snprintf(final_expr, 255, "%s->%s", obj, prop);
+                        }
+                        else
+                        {
+                            strcpy(final_expr, expr_buffer);
+                        }
                     }
                 }
                 else
                 {
+                    // Simple property access: p.field
                     char *dot = strchr(expr_buffer, '.');
                     if (dot)
                     {
@@ -422,6 +477,11 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
                                 size_t len = strlen(var_type);
                                 if (len > 0 && var_type[len - 1] == '*')
                                 {
+                                    is_ptr = 1;
+                                }
+                                else if (is_struct_type(var_type))
+                                {
+                                    // REFERENCE SEMANTICS: Structs are always pointers
                                     is_ptr = 1;
                                 }
                             }
@@ -2037,34 +2097,13 @@ void codegen(ASTNode *node, FILE *file)
                 {
                     is_pointer = true;
                 }
-                // Case 2: If obj is an array access, check if the array is of structs
-                // Arrays of structs return pointers, so use ->
+                // Case 2: Array Access always returns a pointer for structs
+                // With Reference Semantics, arrays of structs are Pessoa**, and arr[i] returns Pessoa*
+                // Since primitives don't have properties, if we're accessing a property on array access,
+                // it must be a struct array, so always use ->
                 else if (obj->type == NODE_ARRAY_ACCESS)
                 {
-                    // Array access: arr[i] or p->filhos[i]
-                    // Need to determine if the array is of structs
-                    if (obj->name)
-                    {
-                        // Simple array access: arr[i]
-                        char *array_type = scope_lookup(obj->name);
-                        if (array_type && array_type[0] == '[')
-                        {
-                            const char *base_type;
-                            count_array_depth(array_type, &base_type);
-                            if (is_struct_type(base_type))
-                            {
-                                is_pointer = true;
-                            }
-                        }
-                    }
-                    else if (arrlen(obj->children) > 0)
-                    {
-                        // Nested array access or property access: p->filhos[i]
-                        // The base could be a property access that returns an array of structs
-                        // For now, assume it's a pointer if we can't determine
-                        // This handles cases like p->filhos[i].nome
-                        is_pointer = true;
-                    }
+                    is_pointer = true;
                 }
                 // Case 3: If obj is a property access (nested), check if the previous access returned a pointer
                 // When we access a struct field that is a struct type, it returns a pointer
@@ -2446,20 +2485,37 @@ void codegen(ASTNode *node, FILE *file)
                         }
                     }
                 }
-                else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF)
+                else if (arrlen(node->children) > 0)
                 {
-                    char *obj_type = scope_lookup(node->children[0]->name);
-                    if (obj_type)
+                    ASTNode *obj = node->children[0];
+                    
+                    // Array Access always returns a pointer for structs
+                    // With Reference Semantics, arrays of structs are Pessoa**, and arr[i] returns Pessoa*
+                    if (obj->type == NODE_ARRAY_ACCESS)
                     {
-                        size_t len = strlen(obj_type);
-                        if (len > 0 && obj_type[len - 1] == '*')
+                        obj_is_pointer = true;
+                    }
+                    // Property access on structs returns pointers
+                    else if (obj->type == NODE_PROP_ACCESS)
+                    {
+                        obj_is_pointer = true;
+                    }
+                    // Variable reference - check symbol table
+                    else if (obj->type == NODE_VAR_REF)
+                    {
+                        char *obj_type = scope_lookup(obj->name);
+                        if (obj_type)
                         {
-                            obj_is_pointer = true;
-                        }
-                        else if (is_struct_type(obj_type))
-                        {
-                            // REFERENCE SEMANTICS: Structs are always pointers
-                            obj_is_pointer = true;
+                            size_t len = strlen(obj_type);
+                            if (len > 0 && obj_type[len - 1] == '*')
+                            {
+                                obj_is_pointer = true;
+                            }
+                            else if (is_struct_type(obj_type))
+                            {
+                                // REFERENCE SEMANTICS: Structs are always pointers
+                                obj_is_pointer = true;
+                            }
                         }
                     }
                 }
