@@ -662,7 +662,10 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "// Auto-typing macro for printf\n");
         fprintf(file, "#define print_any(x) _Generic((x), \\\n");
         fprintf(file, "    int: \"%%d\", \\\n");
+        fprintf(file, "    long: \"%%ld\", \\\n");
         fprintf(file, "    long long: \"%%lld\", \\\n");
+        fprintf(file, "    unsigned int: \"%%u\", \\\n");
+        fprintf(file, "    unsigned long: \"%%lu\", \\\n");
         fprintf(file, "    short: \"%%hd\", \\\n");
         fprintf(file, "    float: \"%%f\", \\\n");
         fprintf(file, "    double: \"%%f\", \\\n");
