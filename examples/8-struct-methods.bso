@@ -1,0 +1,36 @@
+programa "MetodosEmEstruturas" {
+    estrutura Pessoa {
+        nome: texto
+        idade: inteiro32
+        filhos: [Pessoa]
+    }
+
+    funcao saudar(eu: Pessoa): vazio {
+        escreval("Olá, meu nome é ${eu.nome} e eu tenho ${eu.idade} anos.");
+    }
+
+    funcao saudarComNome(eu: Pessoa, outraPessoa: Pessoa): vazio {
+        escreval("Olá, meu nome é ${eu.nome} e eu tenho ${eu.idade} anos. ${outraPessoa.nome} tem ${outraPessoa.idade} anos.");
+    }
+
+    var p: Pessoa = nova Pessoa;
+    p.nome = "João";
+    p.idade = 20;
+    p.filhos = [];
+
+    p.saudar();
+
+    var p2: Pessoa = nova Pessoa;
+    p2.nome = "Maria";
+    p2.idade = 30;
+    p2.filhos = [];
+
+    p.saudarComNome(p2);
+
+    var p3: Pessoa = nova Pessoa;
+    p3.nome = "Pedro";
+    p3.idade = 40;
+    p3.filhos = [];
+
+    p2.saudarComNome(p3);
+}

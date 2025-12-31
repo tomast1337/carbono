@@ -1,0 +1,9 @@
+programa "FFI" {
+    externo math "libm.so.6" {
+        funcao cosseno(x: real64): real64 = "cos"
+    }
+
+    var x: real64 = 3.141592653589793238;
+    var resultado: real64 = math.cosseno(x);
+    escreval("O cosseno de ${x} é ${resultado}");
+}
