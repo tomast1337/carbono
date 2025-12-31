@@ -1,0 +1,17 @@
+programa "BibliotecaUso" {
+    externo lib "./BibliotecaImplementada.so" {
+        funcao soma(a: inteiro32, b: inteiro32): inteiro32
+        funcao subtrai(a: inteiro32, b: inteiro32): inteiro32
+        funcao multiplica(a: inteiro32, b: inteiro32): inteiro32
+        funcao divide(a: inteiro32, b: inteiro32): inteiro32
+        funcao potencia(a: inteiro32, b: inteiro32): inteiro32
+    }
+
+    var a: inteiro32 = 3;
+    var b: inteiro32 = 4;
+    escreval("A soma de ${a} e ${b} é ${lib.soma(a, b)}");
+    escreval("A subtração de ${a} e ${b} é ${lib.subtrai(a, b)}");
+    escreval("A multiplicação de ${a} e ${b} é ${lib.multiplica(a, b)}");
+    escreval("A divisão de ${a} e ${b} é ${lib.divide(a, b)}");
+    escreval("A potência de ${a} e ${b} é ${lib.potencia(a, b)}");
+}

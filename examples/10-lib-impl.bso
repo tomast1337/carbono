@@ -1,0 +1,28 @@
+biblioteca "BibliotecaImplementada" {
+    funcao soma(a: inteiro32, b: inteiro32): inteiro32 {
+        retorne a + b;
+    }
+
+    funcao subtrai(a: inteiro32, b: inteiro32): inteiro32 {
+        retorne a - b;
+    }
+
+    funcao multiplica(a: inteiro32, b: inteiro32): inteiro32 {
+        retorne a * b;
+    }
+    
+    funcao divide(a: inteiro32, b: inteiro32): inteiro32 {
+        retorne a / b;
+    }
+
+    funcao potencia(a: inteiro32, b: inteiro32): inteiro32 {
+        var resultado: inteiro32 = 1;
+        cada (i: inteiro32 : 0..b) {
+            resultado = resultado * a;
+        }
+        retorne resultado;
+    }
+    
+    escreval("[Biblioteca] Função inicial opcional da biblioteca.");
+    
+}
