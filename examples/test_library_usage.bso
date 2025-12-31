@@ -1,9 +1,0 @@
-programa "App" {
-    externo mat "./Matematica.so" {
-        funcao dobrar(x: inteiro32): inteiro32
-    }
-    
-    var res: inteiro32 = mat.dobrar(10);
-    escreval("Resultado: ${res}");
-}
-

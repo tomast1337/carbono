@@ -1,0 +1,10 @@
+programa "OlaMundo" {
+    var ola: texto = "Ola";
+    var mundo: texto = "Mundo";
+    var ola_mundo: texto = "${ola}, ${mundo}!";
+    escreval(ola_mundo);
+
+    escreva("Olá, ");
+    escreva("Mundo");
+    escreva("!\n");
+}

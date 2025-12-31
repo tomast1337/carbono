@@ -1,0 +1,26 @@
+programa "Estruturas" {
+    estrutura Pessoa {
+        nome: texto
+        idade: inteiro32
+        filhos: [Pessoa]
+    }
+
+    var p: Pessoa = nova Pessoa;
+    p.nome = "João";
+    p.idade = 20;
+    p.filhos = [];
+
+    var filho1: Pessoa = nova Pessoa;
+    filho1.nome = "João Junior";
+    filho1.idade = 10;
+    filho1.filhos = [nova Pessoa];
+    p.filhos.push(filho1);
+
+    escreval("Nome: ${p.nome}\n");
+    escreval("Idade: ${p.idade}\n");
+    escreval("Filhos: ${p.filhos.len}\n");
+
+    cada (i : 0..p.filhos.len) {
+        escreval("Filho ${i + 1}: ${p.filhos[i].nome} - Idade: ${p.filhos[i].idade}\n");
+    }
+}

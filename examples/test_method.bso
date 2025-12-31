@@ -1,5 +1,0 @@
-programa "TestMethod" {
-    var arr: [inteiro32] = [1, 2, 3];
-    arr.push(4);
-}
-

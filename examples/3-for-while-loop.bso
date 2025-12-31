@@ -1,0 +1,18 @@
+programa "LaçoPara" {
+    cada (i: inteiro32 : 0..10) {
+        cada (j: inteiro32 : 0..10) {
+            escreval("i = ${i}, j = ${j}, ixj=${i * j}");
+        }
+    }
+    escreval("\n Pressione ENTER para continuar...");
+    ler();
+    
+    var i: inteiro32 = 0;
+    enquanto (i < 10) {
+        escreval("i = ${i}");
+        i = i + 1;
+    }
+
+    escreval("\n Pressione ENTER para continuar...");
+    ler();
+}

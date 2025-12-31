@@ -1,5 +1,0 @@
-programa "BasicArray" {
-    var arr: [inteiro32] = [1, 2, 3];
-    escreval("Test");
-}
-

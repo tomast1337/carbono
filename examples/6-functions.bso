@@ -1,0 +1,49 @@
+programa "Funções" {
+
+    funcao soma(a: inteiro32, b: inteiro32): inteiro32 {
+        retorne a + b;
+    }
+
+    var a: inteiro32 = 10;
+    var b: inteiro32 = 20;
+    escreval("${a} + ${b} = ${soma(a, b)}");
+
+    funcao merge_sort(lista: [inteiro32]): [inteiro32] {
+        se (lista.len <= 1) {
+            retorne lista;
+        }
+        var ponto_médio: inteiro32 = lista.len / 2;
+        var esquerda: [inteiro32] = merge_sort(lista[0..ponto_médio]);
+        var direita: [inteiro32] = merge_sort(lista[ponto_médio..lista.len]);
+        retorne merge(esquerda, direita);
+    }
+
+    funcao merge(esquerda: [inteiro32], direita: [inteiro32]): [inteiro32] {
+        var result: [inteiro32] = [];
+        var i: inteiro32 = 0;
+        var j: inteiro32 = 0;
+        enquanto (i < esquerda.len && j < direita.len) {
+            se (esquerda[i] < direita[j]) {
+                result.push(esquerda[i]);
+                i = i + 1;
+            } senao {
+                result.push(direita[j]);
+                j = j + 1;
+            }
+        }
+        enquanto (i < esquerda.len) {
+            result.push(esquerda[i]);
+            i = i + 1;
+        }
+        enquanto (j < direita.len) {
+            result.push(direita[j]);
+            j = j + 1;
+        }
+        retorne result;
+    }
+
+    var arr: [inteiro32] = [64, 34, 25, 12, 22, 11, 90];
+    escreval("Array original: ${arr}");
+    var sorted_arr: [inteiro32] = merge_sort(arr);
+    escreval("Array ordenado: ${sorted_arr}");
+}

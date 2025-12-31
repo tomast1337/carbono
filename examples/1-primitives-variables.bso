@@ -1,0 +1,83 @@
+programa "TiposPrimitivos" {
+    // Tipos de Texto e Caractere
+    var nome: texto = "Nicolas Vyčas Nery";
+    var letra: caractere = "A";
+
+    escreval("Nome = ${nome}");
+    escreval("Letra = ${letra}");
+
+    // Inteiros Sinalizados (Aceitam negativos e positivos)
+    var valor64: inteiro64 = 100_000_000_000_000_000;  // i64: 8 bytes
+    var valor32: inteiro32 = 2_147_483_647;           // i32: 4 bytes
+    var valor16: inteiro16 = 32_767;                  // i16: 2 bytes
+    var valor8:  inteiro8  = 127;                     // i8:  1 byte
+    var valor_arq: inteiro_arq = 0;                   // Depende da arquitetura (32 ou 64 bits)
+
+    escreval("Valor64 = ${valor64}");
+    escreval("Valor32 = ${valor32}");
+    escreval("Valor16 = ${valor16}");
+    escreval("Valor8 = ${valor8}");
+    escreval("Valor_arq = ${valor_arq}");
+
+    // Naturais / Não-Sinalizados (Apenas positivos)
+    var n_u32: natural32 = 4_294_967_295;
+    var n_u64: natural64 = 18_446_744_073_709_551_615;
+    var n_u16: natural16 = 65_535;
+    var n_arq: natural_arq = 1024;                   // Tamanho de palavra da CPU
+    var tam:   tamanho     = 100;                    // Geralmente usado para índices/tamanhos (size_t)
+    var b:     byte        = 255;                     // 8 bits sem sinal
+
+    escreval("N_u32 = ${n_u32}");
+    escreval("N_u64 = ${n_u64}");
+    escreval("N_u16 = ${n_u16}");
+    escreval("N_arq = ${n_arq}");
+    escreval("Tam = ${tam}");
+    escreval("B = ${b}");
+
+    // Ponto Flutuante (Números Reais/Decimais)
+    var r32: real32  = 3.14;                          // Precisão simples (float)
+    var r64: real64  = 3.1415926535;                  // Precisão dupla (double)
+    var r_ext: real_ext = 3.141592653589793238;       // Precisão estendida (80 ou 128 bits)
+
+    escreval("R32 = ${r32:.2f}");
+    escreval("R64 = ${r64:.10f}");
+    escreval("R_ext = ${r_ext:.20f}");
+    // Lógico
+    var ativo: booleano = verdadeiro;                 // true ou false
+
+    escreval("Ativo = ${ativo}");
+
+    // Memória e Especiais
+    var ptr: ponteiro = nulo;                         // Endereço de memória
+    var v: vazio = nulo;                              // Ausência de valor (void)
+
+    escreval("Ptr = ${ptr}");
+    escreval("V = ${v}");
+
+    // Abreviações Comuns (Aliases)
+    var i8:  i8  = -128;
+    var i16: i16 = -32768;
+    var i32: i32 = -2147483648;
+    var i64: i64 = -9223372036854775808;
+    
+    var n16: n16 = 65535;
+    var n32: n32 = 4294967295;
+    var n64: n64 = 18446744073709551615;
+    
+    var f32: r32 = 1.5;
+    var f64: r64 = 2.71828;
+    var f_ext: r_ext = 1.123456789;
+    var bl: bool = falso;
+
+    escreval("I8 = ${i8}");
+    escreval("I16 = ${i16}");
+    escreval("I32 = ${i32}");
+    escreval("I64 = ${i64}");
+    escreval("N16 = ${n16}");
+    escreval("N32 = ${n32}");
+    escreval("N64 = ${n64}");
+    escreval("F32 = ${f32}");
+    escreval("F64 = ${f64}");
+    escreval("F_ext = ${f_ext}");
+    escreval("Bl = ${bl}");
+}

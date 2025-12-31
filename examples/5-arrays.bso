@@ -1,0 +1,55 @@
+programa "Listas" {
+    var lista: [inteiro32] = [];
+    cada (i: 0..10) {
+        escreval("Digite o ${i + 1}º valor da lista:");
+        lista.push(ler());
+    }
+    escreval("Lista: ${lista}");
+
+    // Ordenar a lista usando bubble sort
+    var n: inteiro32 = lista.len;
+    cada (i: 0..n) {
+        var limit: inteiro32 = n - 1;
+        limit = limit - i;
+        cada (j: 0..limit) {
+            var val1: inteiro32 = lista[j];
+            var val2: inteiro32 = lista[j + 1];
+            se (val1 > val2) {
+                var temp: inteiro32 = lista[j];
+                lista[j] = lista[j + 1];
+                lista[j + 1] = temp;
+            }
+        }
+    }
+
+    escreval("Lista ordenada: ${lista}");
+
+    var duas_dimensoes: [[inteiro32]] = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]
+    ];
+
+    cada (i: 0..duas_dimensoes.len) {
+        cada (j: 0..duas_dimensoes[i].len) {
+            escreval("duas_dimensoes[${i}][${j}] = ${duas_dimensoes[i][j]}");
+        }
+    }
+
+    var lista_de_compras: [texto] = [];
+
+    cada (i: 0..5) {
+        escreval("Digite o ${i + 1}º item da lista de compras:");
+        lista_de_compras.push(ler());
+    }
+    escreval("Lista de compras: ${lista_de_compras}");
+
+    var pedaço: [texto] = lista_de_compras[0..2];
+    escreval("Pedaço: ${pedaço}");
+
+    
+    escreval("\n Pressione ENTER para continuar...");
+    ler();
+
+
+}

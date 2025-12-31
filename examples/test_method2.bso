@@ -1,5 +1,0 @@
-programa "TestMethod2" {
-    var arr: [inteiro32] = [1, 2, 3];
-    var len: inteiro32 = arr.len;
-}
-

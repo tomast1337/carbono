@@ -1,0 +1,23 @@
+programa "Condicionais" {
+    var senha: inteiro32 = 0;
+    escreval("Digite a senha:");
+    senha = ler();
+    se (senha == 1234) {
+        escreval("Senha correta");
+        escreval("Digite o seu nome:");
+        var nome: texto = ler();
+        escreval("Olá ${nome}, bem-vindo ao sistema");
+        escreval("Digite a sua idade:");
+        var idade: inteiro32 = ler();
+        escreval("Você tem ${idade} anos");
+        se (idade >= 18) {
+            escreval("Você é maior de idade");
+        } senao {
+            escreval("Você é menor de idade");
+        }
+    } senao {
+        escreval("Senha incorreta");
+    }
+    escreval("\n Pressione ENTER para continuar...");
+    ler();
+}
