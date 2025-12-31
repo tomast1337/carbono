@@ -82,6 +82,7 @@ ID_START [a-zA-Z_\x80-\xff]
 "nova"      { if (debug_mode) printf("[LEX] TOKEN_NEW\n"); return TOKEN_NEW; }
 "verdadeiro" { if (debug_mode) printf("[LEX] TOKEN_TRUE\n"); return TOKEN_TRUE; }
 "falso"     { if (debug_mode) printf("[LEX] TOKEN_FALSE\n"); return TOKEN_FALSE; }
+"incorporar" { if (debug_mode) printf("[LEX] TOKEN_EMBED\n"); return TOKEN_EMBED; }
 
 ";"         { return TOKEN_SEMICOLON; }
 \.\.        { return TOKEN_DOTDOT; } /* Range Operator 0..10 */

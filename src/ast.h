@@ -37,7 +37,8 @@ typedef enum {
     NODE_RETURN,       // retorne x;
     NODE_EXTERN_BLOCK, // externo math "lib.so" { ... }
     NODE_LITERAL_NULL, // nulo
-    NODE_NEW           // nova Node
+    NODE_NEW,          // nova Node
+    NODE_EMBED         // incorporar "file.png"
 } NodeType;
 
 typedef struct ASTNode {

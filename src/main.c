@@ -10,7 +10,7 @@ extern FILE* yyin;
 extern ASTNode* root_node;
 
 // Declaration from codegen.c
-void codegen(ASTNode* node, FILE* file);
+void codegen(ASTNode* node, FILE* file, FILE* asm_file);
 
 #include "debug.h"
 
@@ -99,20 +99,30 @@ int main(int argc, char** argv) {
         final_name = root_node->name;
     }
 
-    // 5. Generate C File Name (e.g., "Name.c")
+    // 5. Generate C File Name AND ASM File Name
     char c_filename[256];
+    char asm_filename[256];
     snprintf(c_filename, sizeof(c_filename), "%s.c", final_name);
+    snprintf(asm_filename, sizeof(asm_filename), "%s_embeds.S", final_name);
 
-    // 6. Generate C Code
-    if (debug_mode) printf("[Basalto] Generating %s...\n", c_filename);
+    // 6. Generate Code
+    if (debug_mode) printf("[Basalto] Generating %s and %s...\n", c_filename, asm_filename);
     
-    FILE* out = fopen(c_filename, "w");
-    if (!out) {
-        fprintf(stderr, "[Basalto] Error: Could not create %s\n", c_filename);
+    FILE* out_c = fopen(c_filename, "w");
+    FILE* out_asm = fopen(asm_filename, "w");
+    
+    if (!out_c || !out_asm) {
+        fprintf(stderr, "[Basalto] Error: Could not create output files.\n");
+        if (out_c) fclose(out_c);
+        if (out_asm) fclose(out_asm);
         return EXIT_FAILURE;
     }
-    codegen(root_node, out);
-    fclose(out);
+    
+    // Pass BOTH files to codegen
+    codegen(root_node, out_c, out_asm);
+    
+    fclose(out_c);
+    fclose(out_asm);
 
     // 7. Compile with GCC (unless --emit-c is set)
     if (transpile_only) {
@@ -124,14 +134,14 @@ int main(int argc, char** argv) {
             // LIBRARY MODE: Output .so, add -shared -fPIC
             printf("[Basalto] Compiling Library '%s.so'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s deps/sds.c -o %s.so -shared -fPIC -I deps -Wall -ldl -lm", 
-                c_filename, final_name);
+                "gcc %s %s deps/sds.c -o %s.so -shared -fPIC -I deps -Wall -ldl -lm", 
+                c_filename, asm_filename, final_name);
         } else {
             // PROGRAM MODE: Output executable
             printf("[Basalto] Compiling Executable '%s'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s deps/sds.c -o %s -I deps -Wall -ldl -lm", 
-                c_filename, final_name);
+                "gcc %s %s deps/sds.c -o %s -I deps -Wall -ldl -lm", 
+                c_filename, asm_filename, final_name);
         }
         
         if (debug_mode) printf("[CMD] %s\n", cmd);
