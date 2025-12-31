@@ -364,13 +364,43 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
             fprintf(file, "_s = sdscat(_s, \"");
             while (*cursor != '\0' && !starts_with(cursor, "${"))
             {
+                // Handle escape sequences: \n, \t, \r, \\, \"
+                if (*cursor == '\\' && *(cursor + 1) != '\0')
+                {
+                    cursor++; // Skip the backslash
+                    switch (*cursor)
+                    {
+                    case 'n':
+                        fprintf(file, "\\n");
+                        break;
+                    case 't':
+                        fprintf(file, "\\t");
+                        break;
+                    case 'r':
+                        fprintf(file, "\\r");
+                        break;
+                    case '\\':
+                        fprintf(file, "\\\\");
+                        break;
+                    case '"':
+                        fprintf(file, "\\\"");
+                        break;
+                    default:
+                        // Unknown escape sequence, output as-is
+                        fprintf(file, "\\%c", *cursor);
+                        break;
+                    }
+                    cursor++;
+                }
                 // Escape C string characters
-                if (*cursor == '"')
+                else if (*cursor == '"')
                     fprintf(file, "\\\"");
-                else if (*cursor == '\\')
-                    fprintf(file, "\\\\");
                 else if (*cursor == '\n')
                     fprintf(file, "\\n");
+                else if (*cursor == '\t')
+                    fprintf(file, "\\t");
+                else if (*cursor == '\r')
+                    fprintf(file, "\\r");
                 else
                     fputc(*cursor, file);
                 cursor++;
