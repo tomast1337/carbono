@@ -16,9 +16,9 @@ programa "Estruturas" {
     filho1.filhos = [nova Pessoa];
     p.filhos.push(filho1);
 
-    escreval("Nome: ${p.nome}\n");
-    escreval("Idade: ${p.idade}\n");
-    escreval("Filhos: ${p.filhos.len}\n");
+    escreval("Nome: ${p.nome}");
+    escreval("Idade: ${p.idade}");
+    escreval("Filhos: ${p.filhos.len}");
 
     cada (i : 0..p.filhos.len) {
         escreval("Filho ${i + 1}: ${p.filhos[i].nome} - Idade: ${p.filhos[i].idade}\n");
