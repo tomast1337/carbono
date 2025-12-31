@@ -387,9 +387,11 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
                         char *obj = expr_buffer;
                         char *rest = dot_before_bracket + 1; // This includes the property name and [i]
                         
+                        // Build the converted expression
+                        char temp_expr[256] = {0};
                         if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
                         {
-                            snprintf(final_expr, 255, "%s->%s", obj, rest);
+                            snprintf(temp_expr, 255, "%s->%s", obj, rest);
                         }
                         else
                         {
@@ -411,12 +413,53 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
                             }
                             if (is_ptr)
                             {
-                                snprintf(final_expr, 255, "%s->%s", obj, rest);
+                                snprintf(temp_expr, 255, "%s->%s", obj, rest);
                             }
                             else
                             {
-                                snprintf(final_expr, 255, "%s.%s", obj, rest);
+                                snprintf(temp_expr, 255, "%s.%s", obj, rest);
                             }
+                        }
+                        
+                        // Now check if there's a dot after the bracket (e.g., p->filhos[i].nome)
+                        // Find the matching ']' for the first '['
+                        char *matching_bracket = strchr(temp_expr, '[');
+                        if (matching_bracket)
+                        {
+                            int bracket_depth = 1;
+                            char *bracket = matching_bracket + 1;
+                            while (*bracket != '\0' && bracket_depth > 0)
+                            {
+                                if (*bracket == '[') bracket_depth++;
+                                else if (*bracket == ']') bracket_depth--;
+                                bracket++;
+                            }
+                            
+                            // Now look for . after the matching ]
+                            if (bracket_depth == 0 && *(bracket - 1) == ']')
+                            {
+                                char *dot_after = strchr(bracket - 1, '.');
+                                if (dot_after)
+                                {
+                                    // Convert . to -> after array access
+                                    *dot_after = '\0';
+                                    char *array_part = temp_expr;
+                                    char *prop_part = dot_after + 1;
+                                    snprintf(final_expr, 255, "%s->%s", array_part, prop_part);
+                                }
+                                else
+                                {
+                                    strcpy(final_expr, temp_expr);
+                                }
+                            }
+                            else
+                            {
+                                strcpy(final_expr, temp_expr);
+                            }
+                        }
+                        else
+                        {
+                            strcpy(final_expr, temp_expr);
                         }
                     }
                     else
