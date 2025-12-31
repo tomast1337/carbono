@@ -298,43 +298,148 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
 
             // Handle Property Access (self.x or var.field) inside expression
             // We need to convert to '->' if the object is a pointer
+            // Also handle array methods like .len -> arrlen()
             char final_expr[256] = {0};
-            char *dot = strchr(expr_buffer, '.');
-            if (dot)
+            
+            // Check for .len pattern (array method) - handle both .len and ->len
+            char *len_pos = strstr(expr_buffer, ".len");
+            if (!len_pos)
+                len_pos = strstr(expr_buffer, "->len");
+            
+            if (len_pos)
             {
-                *dot = '\0';
-                char *obj = expr_buffer;
-                char *prop = dot + 1;
-                if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
+                // Replace .len or ->len with arrlen()
+                char saved_char = *len_pos;
+                *len_pos = '\0'; // Terminate at .len or ->len
+                
+                // Convert property access in expr_buffer (e.g., "p.filhos" -> "p->filhos")
+                char converted_expr[256] = {0};
+                char *dot = strchr(expr_buffer, '.');
+                if (dot)
                 {
-                    snprintf(final_expr, 255, "%s->%s", obj, prop);
+                    *dot = '\0';
+                    char *obj = expr_buffer;
+                    char *prop = dot + 1;
+                    
+                    if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
+                    {
+                        snprintf(converted_expr, 255, "%s->%s", obj, prop);
+                    }
+                    else
+                    {
+                        // Check if obj is a pointer type in symbol table
+                        char *var_type = scope_lookup(obj);
+                        int is_ptr = 0;
+                        if (var_type)
+                        {
+                            size_t len = strlen(var_type);
+                            if (len > 0 && var_type[len - 1] == '*')
+                            {
+                                is_ptr = 1;
+                            }
+                            else if (is_struct_type(var_type))
+                            {
+                                // REFERENCE SEMANTICS: Structs are always pointers
+                                is_ptr = 1;
+                            }
+                        }
+                        if (is_ptr)
+                        {
+                            snprintf(converted_expr, 255, "%s->%s", obj, prop);
+                        }
+                        else
+                        {
+                            snprintf(converted_expr, 255, "%s.%s", obj, prop);
+                        }
+                    }
                 }
                 else
                 {
-                    // Check if obj is a pointer type in symbol table
-                    char *var_type = scope_lookup(obj);
-                    int is_ptr = 0;
-                    if (var_type)
+                    strcpy(converted_expr, expr_buffer);
+                }
+                
+                snprintf(final_expr, 255, "arrlen(%s)", converted_expr);
+                *len_pos = saved_char; // Restore for safety (though we won't use it)
+            }
+            else
+            {
+                // Find last . or -> before any [
+                char *last_dot = strrchr(expr_buffer, '.');
+                char *last_arrow = strrchr(expr_buffer, '>');
+                char *last_bracket = strrchr(expr_buffer, ']');
+                
+                // Check if we have array access followed by property access
+                // e.g., p->filhos[i].nome
+                if (last_bracket && (last_dot || last_arrow))
+                {
+                    // Determine which operator was used
+                    char *prop_op = NULL;
+                    if (last_arrow && (!last_dot || last_arrow > last_dot))
                     {
-                        size_t len = strlen(var_type);
-                        if (len > 0 && var_type[len - 1] == '*')
+                        prop_op = last_arrow - 1; // Points to '-'
+                        if (*prop_op == '-' && last_arrow > expr_buffer && last_arrow[-1] == '-')
                         {
-                            is_ptr = 1;
+                            // Found -> operator
+                            *prop_op = '\0'; // Terminate before ->
+                            char *obj = expr_buffer;
+                            char *prop = last_arrow + 1;
+                            snprintf(final_expr, 255, "%s->%s", obj, prop);
                         }
                     }
-                    if (is_ptr)
+                    else if (last_dot)
                     {
+                        // Array access with . operator: use -> for struct arrays
+                        *last_dot = '\0';
+                        char *obj = expr_buffer;
+                        char *prop = last_dot + 1;
                         snprintf(final_expr, 255, "%s->%s", obj, prop);
                     }
                     else
                     {
-                        snprintf(final_expr, 255, "%s.%s", obj, prop);
+                        strcpy(final_expr, expr_buffer);
                     }
                 }
-            }
-            else
-            {
-                strcpy(final_expr, expr_buffer);
+                else
+                {
+                    char *dot = strchr(expr_buffer, '.');
+                    if (dot)
+                    {
+                        *dot = '\0';
+                        char *obj = expr_buffer;
+                        char *prop = dot + 1;
+                        
+                        if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
+                        {
+                            snprintf(final_expr, 255, "%s->%s", obj, prop);
+                        }
+                        else
+                        {
+                            // Check if obj is a pointer type in symbol table
+                            char *var_type = scope_lookup(obj);
+                            int is_ptr = 0;
+                            if (var_type)
+                            {
+                                size_t len = strlen(var_type);
+                                if (len > 0 && var_type[len - 1] == '*')
+                                {
+                                    is_ptr = 1;
+                                }
+                            }
+                            if (is_ptr)
+                            {
+                                snprintf(final_expr, 255, "%s->%s", obj, prop);
+                            }
+                            else
+                            {
+                                snprintf(final_expr, 255, "%s.%s", obj, prop);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        strcpy(final_expr, expr_buffer);
+                    }
+                }
             }
 
             // Generate Append Code
@@ -1015,6 +1120,74 @@ void codegen(ASTNode *node, FILE *file)
                     // For property access, we can't easily determine type, use default
                     fprintf(file, "read_int()");
                 }
+                else if (value_node->type == NODE_ARRAY_LITERAL && arrlen(value_node->children) == 0)
+                {
+                    // Empty array literal - need to determine type from field
+                    ASTNode *prop_obj = prop->children[0];
+                    const char *prop_name = prop->data_type ? prop->data_type : "";
+                    const char *field_type = NULL;
+                    
+                    if (prop_obj->type == NODE_VAR_REF && prop_obj->name)
+                    {
+                        // Look up the parent struct type
+                        char *parent_type = scope_lookup(prop_obj->name);
+                        if (parent_type)
+                        {
+                            // Get base type (removes array brackets and '*' suffix if present)
+                            char *base_type = get_base_type(parent_type);
+                            if (!base_type)
+                            {
+                                // Check if it ends with '*'
+                                size_t len = strlen(parent_type);
+                                if (len > 0 && parent_type[len - 1] == '*')
+                                {
+                                    static char base[256];
+                                    strncpy(base, parent_type, len - 1);
+                                    base[len - 1] = '\0';
+                                    base_type = base;
+                                }
+                                else
+                                {
+                                    base_type = parent_type;
+                                }
+                            }
+                            else
+                            {
+                                // get_base_type might have returned something with '*', remove it
+                                size_t len = strlen(base_type);
+                                if (len > 0 && base_type[len - 1] == '*')
+                                {
+                                    base_type[len - 1] = '\0';
+                                }
+                            }
+                            // Look up the field type
+                            field_type = lookup_field_type(base_type, prop_name);
+                        }
+                    }
+                    
+                    if (field_type && field_type[0] == '[')
+                    {
+                        // Field is an array type - generate correct type for empty array
+                        const char *base_type;
+                        count_array_depth(field_type, &base_type);
+                        
+                        if (is_struct_type(base_type))
+                        {
+                            // Array of structs: [Pessoa] -> Pessoa**
+                            fprintf(file, "NULL");
+                        }
+                        else
+                        {
+                            // Array of primitives: [inteiro32] -> int* (NULL)
+                            fprintf(file, "NULL");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback to default
+                        fprintf(file, "NULL");
+                    }
+                }
                 else
                 {
                     // Check if we need to add implicit address-of for struct assignment
@@ -1332,7 +1505,7 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_FUNC_CALL:
-        // Special handling for 'escreval' -> 'printf'
+        // Special handling for 'escreval' -> 'printf' with newline
         if (strcmp(node->name, "escreval") == 0)
         {
             // --- SIMPLE FIX FOR ESCREVAL ---
@@ -1358,6 +1531,33 @@ void codegen(ASTNode *node, FILE *file)
                 }
                 fprintf(file, ");\n");
                 fprintf(file, "    printf(\"\\n\");\n");
+            }
+        }
+        // Special handling for 'escreva' -> 'printf' without newline
+        else if (strcmp(node->name, "escreva") == 0)
+        {
+            // --- ESCREVA (without newline) ---
+            // If input is a literal string, we KNOW it's a string.
+            if (arrlen(node->children) > 0 && node->children[0]->type == NODE_LITERAL_STRING)
+            {
+                fprintf(file, "    printf(\"%%s\", ");
+                codegen_string_literal(node->children[0]->string_value, file);
+                fprintf(file, ");\n");
+            }
+            else
+            {
+                // Generic variable printing
+                fprintf(file, "    printf(print_any(");
+                if (arrlen(node->children) > 0)
+                {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, "), ");
+                if (arrlen(node->children) > 0)
+                {
+                    codegen(node->children[0], file);
+                }
+                fprintf(file, ");\n");
             }
         }
         else
@@ -1617,6 +1817,7 @@ void codegen(ASTNode *node, FILE *file)
 
         // Infer type from first element (if available)
         const char *elem_type = "int"; // Default
+        bool is_struct_array = false;
         if (arrlen(node->children) > 0)
         {
             ASTNode *first = node->children[0];
@@ -1628,10 +1829,23 @@ void codegen(ASTNode *node, FILE *file)
             {
                 elem_type = "double";
             }
+            else if (first->type == NODE_NEW && first->data_type)
+            {
+                // Array of structs: [nova Pessoa] -> Pessoa**
+                elem_type = first->data_type;
+                is_struct_array = true;
+            }
         }
 
         fprintf(file, "({\n");
-        fprintf(file, "        %s* temp_arr_%d = NULL;\n", elem_type, temp_id);
+        if (is_struct_array)
+        {
+            fprintf(file, "        %s** temp_arr_%d = NULL;\n", elem_type, temp_id);
+        }
+        else
+        {
+            fprintf(file, "        %s* temp_arr_%d = NULL;\n", elem_type, temp_id);
+        }
         for (int i = 0; i < arrlen(node->children); i++)
         {
             fprintf(file, "        arrput(temp_arr_%d, ", temp_id);
@@ -1739,8 +1953,27 @@ void codegen(ASTNode *node, FILE *file)
                 ASTNode *field = node->children[i];
                 if (field && field->name && field->data_type)
                 {
-                    // 3. Auto-Pointer Logic
-                    if (is_struct_type(field->data_type))
+                    // Check if it's an array type first
+                    if (field->data_type[0] == '[')
+                    {
+                        // Array type: [Type] -> Type* (for stb_ds dynamic arrays)
+                        const char *base_type;
+                        count_array_depth(field->data_type, &base_type);
+                        
+                        // Check if base type is a struct
+                        if (is_struct_type(base_type))
+                        {
+                            // Array of structs: [Pessoa] -> Pessoa**
+                            fprintf(file, "    %s** %s;\n", base_type, field->name);
+                        }
+                        else
+                        {
+                            // Array of primitives: [inteiro32] -> int*
+                            fprintf(file, "    %s* %s;\n", map_type(base_type), field->name);
+                        }
+                    }
+                    // 3. Auto-Pointer Logic for non-array structs
+                    else if (is_struct_type(field->data_type))
                     {
                         // It's a struct (e.g., "Node"). Make it "Node* next;"
                         fprintf(file, "    %s* %s;\n", field->data_type, field->name);
@@ -1766,22 +1999,28 @@ void codegen(ASTNode *node, FILE *file)
             // Check if this is actually an array method call (arr.len, arr.push, arr.pop)
             // by checking if the property name is a known array method
             const char *prop_name = node->data_type ? node->data_type : "";
-            if (strcmp(prop_name, "len") == 0 || strcmp(prop_name, "push") == 0 || strcmp(prop_name, "pop") == 0)
+            // Also check if obj is an array access or property access that could be an array
+            bool obj_is_array = (obj->type == NODE_ARRAY_ACCESS) || 
+                               (obj->type == NODE_PROP_ACCESS) ||
+                               (obj->type == NODE_VAR_REF && obj->name);
+            
+            if (strcmp(prop_name, "len") == 0 && obj_is_array)
             {
-                // This is likely an array method call, treat it as such
-                if (strcmp(prop_name, "len") == 0)
-                {
-                    fprintf(file, "arrlen(");
-                    codegen(obj, file);
-                    fprintf(file, ")");
-                }
-                else
+                // .len on an array -> arrlen()
+                fprintf(file, "arrlen(");
+                codegen(obj, file);
+                fprintf(file, ")");
+            }
+            else if (strcmp(prop_name, "push") == 0 || strcmp(prop_name, "pop") == 0)
+            {
+                if (strcmp(prop_name, "pop") == 0)
                 {
                     // push/pop without arguments - this shouldn't happen for push, but handle it
                     fprintf(file, "arrpop(");
                     codegen(obj, file);
                     fprintf(file, ")");
                 }
+                // push is handled as method call, not here
             }
             else
             {
@@ -1794,11 +2033,40 @@ void codegen(ASTNode *node, FILE *file)
 
                 // Case 1: 'self' or 'eu' is always a pointer
                 if (obj->type == NODE_VAR_REF && obj->name &&
-                    (strcmp(obj->name, "eu") == 0))
+                    (strcmp(obj->name, "self") == 0 || strcmp(obj->name, "eu") == 0))
                 {
                     is_pointer = true;
                 }
-                // Case 2: If obj is a property access (nested), check if the previous access returned a pointer
+                // Case 2: If obj is an array access, check if the array is of structs
+                // Arrays of structs return pointers, so use ->
+                else if (obj->type == NODE_ARRAY_ACCESS)
+                {
+                    // Array access: arr[i] or p->filhos[i]
+                    // Need to determine if the array is of structs
+                    if (obj->name)
+                    {
+                        // Simple array access: arr[i]
+                        char *array_type = scope_lookup(obj->name);
+                        if (array_type && array_type[0] == '[')
+                        {
+                            const char *base_type;
+                            count_array_depth(array_type, &base_type);
+                            if (is_struct_type(base_type))
+                            {
+                                is_pointer = true;
+                            }
+                        }
+                    }
+                    else if (arrlen(obj->children) > 0)
+                    {
+                        // Nested array access or property access: p->filhos[i]
+                        // The base could be a property access that returns an array of structs
+                        // For now, assume it's a pointer if we can't determine
+                        // This handles cases like p->filhos[i].nome
+                        is_pointer = true;
+                    }
+                }
+                // Case 3: If obj is a property access (nested), check if the previous access returned a pointer
                 // When we access a struct field that is a struct type, it returns a pointer
                 else if (obj->type == NODE_PROP_ACCESS)
                 {
@@ -1806,7 +2074,7 @@ void codegen(ASTNode *node, FILE *file)
                     // n1.next accesses a struct field which is a pointer, so n1.next is a pointer -> use ->
                     is_pointer = true;
                 }
-                // Case 3: If obj is a var_ref, check if it's a pointer type
+                // Case 4: If obj is a var_ref, check if it's a pointer type
                 else if (obj->type == NODE_VAR_REF && obj->name)
                 {
                     // Look up the variable's type in symbol table
@@ -1821,16 +2089,34 @@ void codegen(ASTNode *node, FILE *file)
                         }
                         else
                         {
-                            // REFERENCE SEMANTICS: If base type (without *) is a struct, it's always a pointer
-                            // Remove '*' if present to get base type
-                            char *base_type = var_type;
-                            if (len > 0 && var_type[len - 1] == '*')
-                            {
-                                base_type[len - 1] = '\0';
-                            }
-                            if (is_struct_type(base_type))
+                            // REFERENCE SEMANTICS: If base type is a struct, it's always a pointer
+                            // (This handles cases where the type wasn't stored with * suffix)
+                            if (is_struct_type(var_type))
                             {
                                 is_pointer = true;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Lookup failed - try to infer from property name
+                        // If the property we're accessing exists in any struct type,
+                        // it's likely the object is a struct pointer (REFERENCE SEMANTICS)
+                        const char *prop_name = node->data_type ? node->data_type : "";
+                        if (prop_name[0] != '\0')
+                        {
+                            // Check all registered struct types to see if any have this field
+                            // This is a heuristic - if we find a struct with this field, assume pointer
+                            for (int i = 0; i < shlen(type_registry); i++)
+                            {
+                                const char *struct_name = type_registry[i].key;
+                                FieldEntry *fields = type_registry[i].value;
+                                if (fields && shget(fields, prop_name) != NULL)
+                                {
+                                    // Found a struct with this field - assume it's a pointer
+                                    is_pointer = true;
+                                    break;
+                                }
                             }
                         }
                     }
