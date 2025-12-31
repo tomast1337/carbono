@@ -3,6 +3,7 @@
 #include <string.h>
 #include "ast.h"
 #include "symtable.h"
+#include <stdbool.h>
 
 extern int yyparse();
 extern FILE* yyin;
@@ -14,28 +15,33 @@ void codegen(ASTNode* node, FILE* file);
 #include "debug.h"
 
 // Global debug flag (accessible from lexer)
-int debug_mode = 0;
+bool debug_mode = false;
 
 int main(int argc, char** argv) {
     const char* input_filename = NULL;
     const char* output_filename = NULL; // Specified via -o
-    int transpile_only = 0;             // Specified via --emit-c
+    bool transpile_only = false;             // Specified via --emit-c
+    bool run_after_compile = false;          // Specified via --run or -r
 
     // 1. Parse Arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
-            debug_mode = 1;
+            debug_mode = true;
         } 
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: basalto [options] <input.bso>\n");
             printf("Options:\n");
             printf("  -o <name>     Specify output binary name\n");
             printf("  --emit-c      Generate C code only (skip GCC)\n");
+            printf("  --run, -r     Run the compiled program immediately\n");
             printf("  --debug, -d   Enable debug output\n");
             return 0;
         } 
         else if (strcmp(argv[i], "--emit-c") == 0) {
-            transpile_only = 1;
+            transpile_only = true;
+        }
+        else if (strcmp(argv[i], "--run") == 0 || strcmp(argv[i], "-r") == 0) {
+            run_after_compile = true;
         }
         else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) {
@@ -43,7 +49,7 @@ int main(int argc, char** argv) {
                 i++; // Skip next arg
             } else {
                 fprintf(stderr, "[Basalto] Error: -o requires a filename\n");
-                return 1;
+                return EXIT_FAILURE;
             }
         }
         else if (argv[i][0] != '-') {
@@ -53,14 +59,14 @@ int main(int argc, char** argv) {
 
     if (!input_filename) {
         printf("Usage: basalto [options] <input.bso>\n");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     // 2. Open Input
     yyin = fopen(input_filename, "r");
     if (!yyin) {
         fprintf(stderr, "[Basalto] Error: Could not open file %s\n", input_filename);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     // 3. Parse (Build AST)
@@ -68,12 +74,12 @@ int main(int argc, char** argv) {
     scope_enter();
     if (yyparse() != 0) {
         // Error already printed by yyerror
-        return 1;
+        return EXIT_FAILURE;
     }
     
     if (!root_node) {
         fprintf(stderr, "[Basalto] Error: Empty program or parse failure.\n");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     // Debug: Print AST tree
@@ -103,7 +109,7 @@ int main(int argc, char** argv) {
     FILE* out = fopen(c_filename, "w");
     if (!out) {
         fprintf(stderr, "[Basalto] Error: Could not create %s\n", c_filename);
-        return 1;
+        return EXIT_FAILURE;
     }
     codegen(root_node, out);
     fclose(out);
@@ -133,15 +139,28 @@ int main(int argc, char** argv) {
         int res = system(cmd);
         if (res != 0) {
             fprintf(stderr, "[Basalto] Compilation failed.\n");
-            return 1;
+            return EXIT_FAILURE;
         }
         
         if (is_library) {
             printf("[Basalto] Build successful: ./%s.so\n", final_name);
         } else {
             printf("[Basalto] Build successful: ./%s\n", final_name);
+            
+            // 8. Run the program if --run flag is set
+            if (run_after_compile) {
+                printf("[Basalto] Running ./%s...\n", final_name);
+                char run_cmd[512];
+                snprintf(run_cmd, sizeof(run_cmd), "./%s", final_name);
+                
+                if (debug_mode) printf("[CMD] %s\n", run_cmd);
+                
+                int run_res = system(run_cmd);
+                // Return the program's exit code
+                return run_res;
+            }
         }
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
