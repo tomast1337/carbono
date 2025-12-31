@@ -1,5 +1,7 @@
 %{
 #include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
 #include "ast.h"
 #include "parser.tab.h"
 
@@ -26,7 +28,13 @@ int parse_int(const char* txt) {
         }
     }
     buffer[j] = '\0'; // Null terminate
-    return atoi(buffer);
+    // Use strtol to handle large numbers correctly (avoid overflow)
+    long val = strtol(buffer, NULL, 10);
+    // Clamp to int range to avoid issues, but this is just for the lexer value
+    // The actual value will be preserved in the string and parsed correctly by codegen
+    if (val > INT_MAX) val = INT_MAX;
+    if (val < INT_MIN) val = INT_MIN;
+    return (int)val;
 }
 
 double parse_float(const char* txt) {
@@ -68,6 +76,8 @@ double parse_float(const char* txt) {
 "retorne"   { if (debug_mode) printf("[LEX] TOKEN_RETORNE\n"); return TOKEN_RETORNE; }
 "nulo"      { if (debug_mode) printf("[LEX] TOKEN_NULL\n"); return TOKEN_NULL; }
 "nova"      { if (debug_mode) printf("[LEX] TOKEN_NEW\n"); return TOKEN_NEW; }
+"verdadeiro" { if (debug_mode) printf("[LEX] TOKEN_TRUE\n"); return TOKEN_TRUE; }
+"falso"     { if (debug_mode) printf("[LEX] TOKEN_FALSE\n"); return TOKEN_FALSE; }
 
 ";"         { return TOKEN_SEMICOLON; }
 \.\.        { return TOKEN_DOTDOT; } /* Range Operator 0..10 */

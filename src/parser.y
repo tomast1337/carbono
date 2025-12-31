@@ -31,7 +31,7 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_BIBLIOTECA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
-%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW
+%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW TOKEN_TRUE TOKEN_FALSE
 
 %left '+' '-'
 %left '*' '/'
@@ -543,6 +543,22 @@ factor:
     | TOKEN_NULL {
         /* Null literal: nulo or NULL */
         $$ = ast_new(NODE_LITERAL_NULL);
+    }
+    | TOKEN_TRUE {
+        /* Boolean literal: verdadeiro */
+        $$ = ast_new(NODE_LITERAL_BOOL);
+        $$->int_value = 1;
+    }
+    | TOKEN_FALSE {
+        /* Boolean literal: falso */
+        $$ = ast_new(NODE_LITERAL_BOOL);
+        $$->int_value = 0;
+    }
+    | '-' factor {
+        /* Unary minus: -128, -3.14, etc. */
+        $$ = ast_new(NODE_UNARY_OP);
+        $$->data_type = sdsnew("-");
+        ast_add_child($$, $2); // The operand
     }
     | TOKEN_NEW TOKEN_ID {
         /* Heap allocation: nova Node */

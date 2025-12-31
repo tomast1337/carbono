@@ -467,7 +467,7 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "    return line;\n");
         fprintf(file, "}\n\n");
         fprintf(file, "void wait_enter() {\n");
-        fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
+        //fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
         fprintf(file, "    flush_input();\n");
         fprintf(file, "}\n\n");
 
@@ -675,7 +675,12 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_VAR_DECL:
         // REFERENCE SEMANTICS: Structs are always pointers
+        // Special handling for vazio (void) - can't be a variable type in C, use void* instead
         const char *var_type = map_type(node->data_type);
+        if (strcmp(var_type, "void") == 0)
+        {
+            var_type = "void*";
+        }
         int is_texto = (strcmp(var_type, "char*") == 0);
         int is_struct = is_struct_type(node->data_type);
 
@@ -696,6 +701,10 @@ void codegen(ASTNode *node, FILE *file)
         {
             // For texto (char*), use sds type
             fprintf(file, "    sds %s", node->name);
+            if (arrlen(node->children) > 0)
+            {
+                fprintf(file, " = ");
+            }
         }
         else if (is_struct)
         {
@@ -781,6 +790,18 @@ void codegen(ASTNode *node, FILE *file)
                     {
                         // codegen_string_literal returns sds directly (statement expression)
                         codegen(init_node, file);
+                    }
+                }
+                else if (strcmp(var_type, "char") == 0)
+                {
+                    // For char, extract first character from string literal
+                    if (init_node->string_value && strlen(init_node->string_value) > 0)
+                    {
+                        fprintf(file, "'%c'", init_node->string_value[0]);
+                    }
+                    else
+                    {
+                        fprintf(file, "'\\0'");
                     }
                 }
                 else
@@ -1219,6 +1240,10 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "NULL");
         break;
 
+    case NODE_LITERAL_BOOL:
+        fprintf(file, "%s", node->int_value ? "1" : "0");
+        break;
+
     case NODE_NEW:
         // nova Node -> (Node*)calloc(1, sizeof(Node))
         // calloc is better than malloc because it zeros memory (sets fields to NULL)
@@ -1227,6 +1252,18 @@ void codegen(ASTNode *node, FILE *file)
 
     case NODE_VAR_REF:
         fprintf(file, "%s", node->name);
+        break;
+
+    case NODE_UNARY_OP:
+        // Unary operations: -, + (unary plus)
+        // node->data_type contains the operator
+        // node->children[0] is the operand
+        const char *unary_op = node->data_type ? node->data_type : "-";
+        fprintf(file, "%s", unary_op);
+        if (arrlen(node->children) > 0)
+        {
+            codegen(node->children[0], file);
+        }
         break;
 
     case NODE_BINARY_OP:

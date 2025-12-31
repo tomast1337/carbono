@@ -16,6 +16,7 @@ typedef enum {
     NODE_LITERAL_DOUBLE, // 10.5
     NODE_LITERAL_FLOAT, // 10.5f
     NODE_LITERAL_STRING, // "Hello"
+    NODE_LITERAL_BOOL, // verdadeiro, falso
     NODE_VAR_REF, // x
     NODE_BINARY_OP, // For x + y, x - y
     NODE_UNARY_OP, // For -x
