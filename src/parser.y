@@ -42,7 +42,7 @@ ASTNode* root_node = NULL;
 %left '('
 
 /* Types for non-terminals */
-%type <node> root program library block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt extern_block extern_func_list extern_func opt_symbol_map
+%type <node> root program library block statements statement var_decl assign_stmt if_stmt enquanto_stmt expr logical_expr comparison_expr term factor cada_stmt infinito_stmt flow_stmt input_stmt type_def array_literal expr_list arg_list method_call struct_def field_list field_decl prop_access lvalue assert_stmt func_def param_list param return_stmt extern_block extern_func_list extern_func opt_symbol_map
 
 %%
 
@@ -150,11 +150,16 @@ statement:
     | return_stmt  /* Allow return */
     | assert_stmt
     | extern_block /* Allow extern blocks */
-    | TOKEN_ID '(' expr ')' {
-         /* Function Call Stub */
+    | TOKEN_ID '(' arg_list ')' {
+         /* Function Call with arguments */
          $$ = ast_new(NODE_FUNC_CALL);
          $$->name = sdsnew($1);
-         ast_add_child($$, $3);
+         // Add all arguments as children
+         if ($3 && arrlen($3->children) > 0) {
+             for(int i=0; i<arrlen($3->children); i++) {
+                 ast_add_child($$, $3->children[i]);
+             }
+         }
     }
     ;
 
@@ -267,202 +272,146 @@ lvalue:
     ;
 
 if_stmt:
-    /* Matches: se ( expr > expr ) { ... } - supports expressions on both sides */
-    TOKEN_SE '(' expr '>' expr ')' block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;            // Left expression stored as child
-        $$->data_type = sdsnew(">"); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // If block
-    }
-    | TOKEN_SE '(' expr '<' expr ')' block {
+    /* Matches: se ( logical_expr ) { ... } - supports expressions with comparison and logical operators */
+    TOKEN_SE '(' logical_expr ')' block {
         $$ = ast_new(NODE_IF);
         $$->name = NULL;
-        $$->data_type = sdsnew("<"); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // If block
+        // Store the full condition expression as first child
+        // Try to extract operator for simple comparisons (for backward compatibility with codegen)
+        if ($3->type == NODE_BINARY_OP && $3->data_type &&
+            (strcmp($3->data_type, ">") == 0 || strcmp($3->data_type, "<") == 0 ||
+             strcmp($3->data_type, ">=") == 0 || strcmp($3->data_type, "<=") == 0 ||
+             strcmp($3->data_type, "==") == 0 || strcmp($3->data_type, "!=") == 0) &&
+            arrlen($3->children) >= 2) {
+            // Simple comparison: extract operator and operands
+            $$->data_type = sdsnew($3->data_type);
+            ast_add_child($$, $3->children[0]); // Left operand
+            ast_add_child($$, $3->children[1]); // Right operand
+        } else {
+            // Complex expression: store as-is
+            $$->data_type = NULL;
+            ast_add_child($$, $3); // Full condition expression
+        }
+        ast_add_child($$, $5);      // If block
     }
-    | TOKEN_SE '(' expr '>' '=' expr ')' block {
+    | TOKEN_SE '(' logical_expr ')' block TOKEN_SENAO block {
+        /* Matches: se ( logical_expr ) { ... } senao { ... } */
         $$ = ast_new(NODE_IF);
         $$->name = NULL;
-        $$->data_type = sdsnew(">="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-    }
-    | TOKEN_SE '(' expr '<' '=' expr ')' block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("<="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-    }
-    | TOKEN_SE '(' expr '=' '=' expr ')' block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("=="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-    }
-    | TOKEN_SE '(' expr '!' '=' expr ')' block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("!="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-    }
-    | TOKEN_SE '(' expr '>' expr ')' block TOKEN_SENAO block {
-        /* Matches: se ( expr > expr ) { ... } senao { ... } */
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew(">"); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // If block
-        ast_add_child($$, $9);      // Else block
-    }
-    | TOKEN_SE '(' expr '<' expr ')' block TOKEN_SENAO block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("<"); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // If block
-        ast_add_child($$, $9);      // Else block
-    }
-    | TOKEN_SE '(' expr '>' '=' expr ')' block TOKEN_SENAO block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew(">="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-        ast_add_child($$, $10);     // Else block
-    }
-    | TOKEN_SE '(' expr '<' '=' expr ')' block TOKEN_SENAO block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("<="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-        ast_add_child($$, $10);     // Else block
-    }
-    | TOKEN_SE '(' expr '=' '=' expr ')' block TOKEN_SENAO block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("=="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-        ast_add_child($$, $10);     // Else block
-    }
-    | TOKEN_SE '(' expr '!' '=' expr ')' block TOKEN_SENAO block {
-        $$ = ast_new(NODE_IF);
-        $$->name = NULL;
-        $$->data_type = sdsnew("!="); // Operator
-        ast_add_child($$, $3);      // Left-hand expression
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // If block
-        ast_add_child($$, $10);     // Else block
+        // Store the full condition expression as first child
+        // Try to extract operator for simple comparisons (for backward compatibility with codegen)
+        if ($3->type == NODE_BINARY_OP && $3->data_type &&
+            (strcmp($3->data_type, ">") == 0 || strcmp($3->data_type, "<") == 0 ||
+             strcmp($3->data_type, ">=") == 0 || strcmp($3->data_type, "<=") == 0 ||
+             strcmp($3->data_type, "==") == 0 || strcmp($3->data_type, "!=") == 0) &&
+            arrlen($3->children) >= 2) {
+            // Simple comparison: extract operator and operands
+            $$->data_type = sdsnew($3->data_type);
+            ast_add_child($$, $3->children[0]); // Left operand
+            ast_add_child($$, $3->children[1]); // Right operand
+        } else {
+            // Complex expression: store as-is
+            $$->data_type = NULL;
+            ast_add_child($$, $3); // Full condition expression
+        }
+        ast_add_child($$, $5);      // If block
+        ast_add_child($$, $7);      // Else block
     }
     ;
 
 enquanto_stmt:
-    /* Matches: enquanto ( x > 5 ) { ... } */
-    TOKEN_ENQUANTO '(' TOKEN_ID '>' expr ')' block {
+    /* Matches: enquanto ( logical_expr ) { ... } - supports expressions with comparison and logical operators */
+    TOKEN_ENQUANTO '(' logical_expr ')' block {
         $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew(">"); // Operator
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // Block
-    }
-    | TOKEN_ENQUANTO '(' TOKEN_ID '<' expr ')' block {
-        $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew("<"); // Operator
-        ast_add_child($$, $5);      // Right-hand expression
-        ast_add_child($$, $7);      // Block
-    }
-    | TOKEN_ENQUANTO '(' TOKEN_ID '>' '=' expr ')' block {
-        $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew(">="); // Operator
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // Block
-    }
-    | TOKEN_ENQUANTO '(' TOKEN_ID '<' '=' expr ')' block {
-        $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew("<="); // Operator
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // Block
-    }
-    | TOKEN_ENQUANTO '(' TOKEN_ID '=' '=' expr ')' block {
-        $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew("=="); // Operator
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // Block
-    }
-    | TOKEN_ENQUANTO '(' TOKEN_ID '!' '=' expr ')' block {
-        $$ = ast_new(NODE_ENQUANTO);
-        $$->name = sdsnew($3);      // Variable (x)
-        $$->data_type = sdsnew("!="); // Operator
-        ast_add_child($$, $6);      // Right-hand expression
-        ast_add_child($$, $8);      // Block
+        $$->name = NULL;
+        // Store the full condition expression as first child
+        // Try to extract operator for simple comparisons (for backward compatibility with codegen)
+        if ($3->type == NODE_BINARY_OP && $3->data_type &&
+            (strcmp($3->data_type, ">") == 0 || strcmp($3->data_type, "<") == 0 ||
+             strcmp($3->data_type, ">=") == 0 || strcmp($3->data_type, "<=") == 0 ||
+             strcmp($3->data_type, "==") == 0 || strcmp($3->data_type, "!=") == 0) &&
+            arrlen($3->children) >= 2) {
+            // Simple comparison: extract operator and operands
+            $$->data_type = sdsnew($3->data_type);
+            ast_add_child($$, $3->children[0]); // Left operand
+            ast_add_child($$, $3->children[1]); // Right operand
+        } else {
+            // Complex expression: store as-is
+            $$->data_type = NULL;
+            ast_add_child($$, $3); // Full condition expression
+        }
+        ast_add_child($$, $5);      // Block
     }
     ;
 
 expr:
-    expr '+' term {
+    logical_expr {
+        $$ = $1;
+    }
+    ;
+
+logical_expr:
+    logical_expr '|' '|' comparison_expr {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("||");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
+    | logical_expr '&' '&' comparison_expr {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("&&");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $4); // Right operand
+    }
+    | comparison_expr {
+        $$ = $1;
+    }
+    ;
+
+comparison_expr:
+    comparison_expr '+' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("+");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
-    | expr '-' term {
+    | comparison_expr '-' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("-");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
-    | expr '>' term {
+    | comparison_expr '>' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew(">");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
-    | expr '<' term {
+    | comparison_expr '<' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("<");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
-    | expr '>' '=' term {
+    | comparison_expr '>' '=' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew(">=");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $4); // Right operand
     }
-    | expr '<' '=' term {
+    | comparison_expr '<' '=' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("<=");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $4); // Right operand
     }
-    | expr '=' '=' term {
+    | comparison_expr '=' '=' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("==");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $4); // Right operand
     }
-    | expr '!' '=' term {
+    | comparison_expr '!' '=' term {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("!=");
         ast_add_child($$, $1); // Left operand
@@ -511,6 +460,21 @@ factor:
     | TOKEN_ID {
         $$ = ast_new(NODE_VAR_REF);
         $$->name = sdsnew($1);
+    }
+    | TOKEN_ID '[' expr TOKEN_DOTDOT expr ']' {
+        /* Array slice: arr[0..2] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = sdsnew($1);
+        ast_add_child($$, $3); // Start index
+        ast_add_child($$, $5); // End index
+    }
+    | factor '[' expr TOKEN_DOTDOT expr ']' {
+        /* Nested array slice: arr[0][1..3] */
+        $$ = ast_new(NODE_ARRAY_ACCESS);
+        $$->name = NULL; // Will be generated from child
+        ast_add_child($$, $1); // Base expression (could be another array access)
+        ast_add_child($$, $3); // Start index
+        ast_add_child($$, $5); // End index
     }
     | TOKEN_ID '[' expr ']' {
         /* Array access: arr[0] */
@@ -565,11 +529,16 @@ factor:
         $$ = ast_new(NODE_NEW);
         $$->data_type = sdsnew($2);
     }
-    | TOKEN_ID '(' expr ')' {
-        /* Function call as expression: formatar_texto("...") */
+    | TOKEN_ID '(' arg_list ')' {
+        /* Function call as expression: formatar_texto("...") or merge(left, right) */
         $$ = ast_new(NODE_FUNC_CALL);
         $$->name = sdsnew($1);
-        ast_add_child($$, $3);
+        // Add all arguments as children
+        if ($3 && arrlen($3->children) > 0) {
+            for(int i=0; i<arrlen($3->children); i++) {
+                ast_add_child($$, $3->children[i]);
+            }
+        }
     }
     | '(' expr ')' {
         $$ = $2;
@@ -763,6 +732,20 @@ expr_list:
     | expr_list ',' expr {
         $$ = $1;
         ast_add_child($$, $3);
+    }
+    ;
+
+arg_list:
+    expr {
+        $$ = ast_new(NODE_BLOCK); // Temp container for arguments
+        ast_add_child($$, $1);
+    }
+    | arg_list ',' expr {
+        $$ = $1;
+        ast_add_child($$, $3);
+    }
+    | /* empty */ { 
+        $$ = ast_new(NODE_BLOCK); // Empty argument list
     }
     ;
 

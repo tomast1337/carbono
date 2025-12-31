@@ -352,9 +352,43 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
             }
             else
             {
-                // Auto-detection using _Generic
-                // "print_any" returns the format string ("%d", "%f") based on type
-                fprintf(file, "_s = sdscatprintf(_s, print_any(%s), %s); ", final_expr, final_expr);
+                // Check if the variable is an array type
+                char *var_type = scope_lookup(final_expr);
+                if (var_type && var_type[0] == '[')
+                {
+                    // Get the base type of the array
+                    char *base_type = get_base_type(var_type);
+                    if (base_type)
+                    {
+                        const char *c_base = map_type(base_type);
+                        if (strcmp(c_base, "int") == 0 || strcmp(base_type, "inteiro32") == 0 || strcmp(base_type, "i32") == 0)
+                        {
+                            // Use int array helper function
+                            fprintf(file, "_s = sdscat(_s, array_int_to_string(%s)); ", final_expr);
+                        }
+                        else if (strcmp(c_base, "char*") == 0 || strcmp(base_type, "texto") == 0)
+                        {
+                            // Use string array helper function
+                            fprintf(file, "_s = sdscat(_s, array_string_to_string(%s)); ", final_expr);
+                        }
+                        else
+                        {
+                            // For other array types, fall back to print_any (may need more helpers later)
+                            fprintf(file, "_s = sdscatprintf(_s, print_any(%s), %s); ", final_expr, final_expr);
+                        }
+                    }
+                    else
+                    {
+                        // Couldn't determine base type, fall back to print_any
+                        fprintf(file, "_s = sdscatprintf(_s, print_any(%s), %s); ", final_expr, final_expr);
+                    }
+                }
+                else
+                {
+                    // Auto-detection using _Generic
+                    // "print_any" returns the format string ("%d", "%f") based on type
+                    fprintf(file, "_s = sdscatprintf(_s, print_any(%s), %s); ", final_expr, final_expr);
+                }
             }
         }
         // CASE B: Static Text
@@ -512,6 +546,28 @@ void codegen(ASTNode *node, FILE *file)
         fprintf(file, "sds float64_to_string(double x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
         fprintf(file, "sds float_ext_to_string(long double x) { return sdscatprintf(sdsempty(), \"%%Lf\", x); }\n");
         fprintf(file, "sds char_to_string(char* x) { return sdsnew(x); }\n"); // Copy
+        fprintf(file, "sds array_int_to_string(int* arr) {\n");
+        fprintf(file, "    if (!arr || arrlen(arr) == 0) return sdsnew(\"[]\");\n");
+        fprintf(file, "    sds result = sdsnew(\"[\");\n");
+        fprintf(file, "    for (int i = 0; i < arrlen(arr); i++) {\n");
+        fprintf(file, "        if (i > 0) result = sdscat(result, \", \");\n");
+        fprintf(file, "        result = sdscatprintf(result, \"%%d\", arr[i]);\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    result = sdscat(result, \"]\");\n");
+        fprintf(file, "    return result;\n");
+        fprintf(file, "}\n");
+        fprintf(file, "sds array_string_to_string(char** arr) {\n");
+        fprintf(file, "    if (!arr || arrlen(arr) == 0) return sdsnew(\"[]\");\n");
+        fprintf(file, "    sds result = sdsnew(\"[\");\n");
+        fprintf(file, "    for (int i = 0; i < arrlen(arr); i++) {\n");
+        fprintf(file, "        if (i > 0) result = sdscat(result, \", \");\n");
+        fprintf(file, "        result = sdscat(result, \"\\\"\");\n");
+        fprintf(file, "        if (arr[i]) result = sdscat(result, arr[i]);\n");
+        fprintf(file, "        result = sdscat(result, \"\\\"\");\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    result = sdscat(result, \"]\");\n");
+        fprintf(file, "    return result;\n");
+        fprintf(file, "}\n");
         fprintf(file, "\n");
 
         fprintf(file, "// String to Primitives conversions\n");
@@ -1129,21 +1185,23 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_IF:
-        // se ( expr op expr ) { ... } [senao { ... }]
-        // node->name is NULL (or variable name for backward compatibility)
-        // node->data_type is the operator (>, <, >=, <=, ==, !=)
-        // node->children[0] is the left-hand expression
-        // node->children[1] is the right-hand expression
-        // node->children[2] is the if block
-        // node->children[3] is the else block (if present)
-        const char *op = node->data_type ? node->data_type : ">";
-
+        // se ( expr ) { ... } [senao { ... }]
+        // Format 1: node->data_type is the operator (>, <, >=, <=, ==, !=)
+        //   node->children[0] is the left-hand expression
+        //   node->children[1] is the right-hand expression
+        //   node->children[2] is the if block
+        //   node->children[3] is the else block (if present)
+        // Format 2: node->data_type is the operator from comparison_expr
+        //   node->children[0] is the full condition expression (comparison_expr or logical_expr)
+        //   node->children[1] is the if block
+        //   node->children[2] is the else block (if present)
         fprintf(file, "    if (");
 
         // Check if this is the old format (node->name exists) for backward compatibility
         if (node->name != NULL)
         {
             // Old format: se ( x > expr )
+            const char *op = node->data_type ? node->data_type : ">";
             fprintf(file, "%s %s ", node->name, op);
             if (arrlen(node->children) > 0)
             {
@@ -1160,9 +1218,13 @@ void codegen(ASTNode *node, FILE *file)
                 codegen(node->children[2], file); // The else block
             }
         }
-        else
+        else if (node->data_type && arrlen(node->children) >= 3 && 
+                 (strcmp(node->data_type, ">") == 0 || strcmp(node->data_type, "<") == 0 ||
+                  strcmp(node->data_type, ">=") == 0 || strcmp(node->data_type, "<=") == 0 ||
+                  strcmp(node->data_type, "==") == 0 || strcmp(node->data_type, "!=") == 0))
         {
-            // New format: se ( expr > expr )
+            // Format 1: Simple comparison (expr op expr)
+            const char *op = node->data_type;
             if (arrlen(node->children) > 0)
             {
                 codegen(node->children[0], file); // Left-hand expression
@@ -1183,25 +1245,88 @@ void codegen(ASTNode *node, FILE *file)
                 codegen(node->children[3], file); // The else block
             }
         }
+        else
+        {
+            // Format 2: Complex expression (comparison_expr or logical_expr as single child)
+            if (arrlen(node->children) > 0)
+            {
+                codegen(node->children[0], file); // Full condition expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 1)
+            {
+                codegen(node->children[1], file); // The if block
+            }
+            if (arrlen(node->children) > 2)
+            {
+                fprintf(file, " else ");
+                codegen(node->children[2], file); // The else block
+            }
+        }
         fprintf(file, "\n");
         break;
 
     case NODE_ENQUANTO:
-        // enquanto ( x op expr ) { ... }
-        // node->name is the left-hand variable
-        // node->data_type is the operator (>, <, >=, <=, ==, !=)
-        // node->children[0] is the right-hand expression
-        // node->children[1] is the block
-        const char *op_while = node->data_type ? node->data_type : ">";
-        fprintf(file, "    while (%s %s ", node->name, op_while);
-        if (arrlen(node->children) > 0)
+        // enquanto ( expr ) { ... }
+        // Format 1: node->data_type is the operator (>, <, >=, <=, ==, !=)
+        //   node->children[0] is the left-hand expression
+        //   node->children[1] is the right-hand expression
+        //   node->children[2] is the block
+        // Format 2: node->data_type is the operator from comparison_expr
+        //   node->children[0] is the full condition expression (comparison_expr or logical_expr)
+        //   node->children[1] is the block
+        fprintf(file, "    while (");
+
+        // Check if this is the old format (node->name exists) for backward compatibility
+        if (node->name != NULL)
         {
-            codegen(node->children[0], file); // Right-hand expression
+            // Old format: enquanto ( x > expr )
+            const char *op_while = node->data_type ? node->data_type : ">";
+            fprintf(file, "%s %s ", node->name, op_while);
+            if (arrlen(node->children) > 0)
+            {
+                codegen(node->children[0], file); // Right-hand expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 1)
+            {
+                codegen(node->children[1], file); // The block
+            }
         }
-        fprintf(file, ") ");
-        if (arrlen(node->children) > 1)
+        else if (node->data_type && arrlen(node->children) >= 3 &&
+                 (strcmp(node->data_type, ">") == 0 || strcmp(node->data_type, "<") == 0 ||
+                  strcmp(node->data_type, ">=") == 0 || strcmp(node->data_type, "<=") == 0 ||
+                  strcmp(node->data_type, "==") == 0 || strcmp(node->data_type, "!=") == 0))
         {
-            codegen(node->children[1], file); // The block
+            // Format 1: Simple comparison (expr op expr)
+            const char *op_while = node->data_type;
+            if (arrlen(node->children) > 0)
+            {
+                codegen(node->children[0], file); // Left-hand expression
+            }
+            fprintf(file, " %s ", op_while);
+            if (arrlen(node->children) > 1)
+            {
+                codegen(node->children[1], file); // Right-hand expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 2)
+            {
+                codegen(node->children[2], file); // The block
+            }
+        }
+        else
+        {
+            // Format 2: Complex expression (comparison_expr or logical_expr as single child)
+            if (arrlen(node->children) > 0)
+            {
+                codegen(node->children[0], file); // Full condition expression
+            }
+            fprintf(file, ") ");
+            if (arrlen(node->children) > 1)
+            {
+                codegen(node->children[1], file); // The block
+            }
         }
         fprintf(file, "\n");
         break;
@@ -1478,8 +1603,10 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_INPUT_VALUE:
-        // This should only appear as a child of NODE_VAR_DECL
-        // Handled in NODE_VAR_DECL case
+        // Generate read function based on context
+        // Default to read_int() for expressions (e.g., lista.push(ler()))
+        // For variable declarations, this is handled in NODE_VAR_DECL case
+        fprintf(file, "read_int()");
         break;
 
     case NODE_ARRAY_LITERAL:
@@ -1516,24 +1643,86 @@ void codegen(ASTNode *node, FILE *file)
         break;
 
     case NODE_ARRAY_ACCESS:
-        // arr[0] or arr[0][1]
+        // arr[0] or arr[0][1] or arr[0..2] (slice)
         if (node->name)
         {
-            // Simple access: arr[0]
-            fprintf(file, "%s[", node->name);
-            if (arrlen(node->children) > 0)
+            // Check if this is a slice (2 children) or single access (1 child)
+            if (arrlen(node->children) == 2)
             {
-                codegen(node->children[0], file); // Index
+                // Array slice: arr[0..2]
+                const char *array_name = node->name;
+                char *array_type = scope_lookup(array_name);
+                
+                if (array_type && array_type[0] == '[')
+                {
+                    char *base_type = get_base_type(array_type);
+                    const char *c_base = map_type(base_type);
+                    
+                    // Generate code to create a new array with sliced elements
+                    static int slice_counter = 0;
+                    int slice_id = slice_counter++;
+                    
+                    fprintf(file, "({\n");
+                    fprintf(file, "        %s* slice_arr_%d = NULL;\n", c_base, slice_id);
+                    fprintf(file, "        int start_idx_%d = ", slice_id);
+                    codegen(node->children[0], file); // Start index
+                    fprintf(file, ";\n");
+                    fprintf(file, "        int end_idx_%d = ", slice_id);
+                    codegen(node->children[1], file); // End index
+                    fprintf(file, ";\n");
+                    fprintf(file, "        int len_%d = arrlen(%s);\n", slice_id, array_name);
+                    fprintf(file, "        if (start_idx_%d < 0) start_idx_%d = 0;\n", slice_id, slice_id);
+                    fprintf(file, "        if (end_idx_%d > len_%d) end_idx_%d = len_%d;\n", slice_id, slice_id, slice_id, slice_id);
+                    fprintf(file, "        if (start_idx_%d < end_idx_%d) {\n", slice_id, slice_id);
+                    fprintf(file, "            for (int i_%d = start_idx_%d; i_%d < end_idx_%d; i_%d++) {\n", slice_id, slice_id, slice_id, slice_id, slice_id);
+                    fprintf(file, "                arrput(slice_arr_%d, %s[i_%d]);\n", slice_id, array_name, slice_id);
+                    fprintf(file, "            }\n");
+                    fprintf(file, "        }\n");
+                    fprintf(file, "        slice_arr_%d;\n", slice_id);
+                    fprintf(file, "    })");
+                }
+                else
+                {
+                    // Fallback if type not found
+                    fprintf(file, "%s[", array_name);
+                    codegen(node->children[0], file);
+                    fprintf(file, "]");
+                }
             }
-            fprintf(file, "]");
+            else
+            {
+                // Simple access: arr[0]
+                fprintf(file, "%s[", node->name);
+                if (arrlen(node->children) > 0)
+                {
+                    codegen(node->children[0], file); // Index
+                }
+                fprintf(file, "]");
+            }
         }
         else if (arrlen(node->children) >= 2)
         {
-            // Nested access: arr[0][1]
-            codegen(node->children[0], file); // Base (could be another array access)
-            fprintf(file, "[");
-            codegen(node->children[1], file); // Index
-            fprintf(file, "]");
+            // Check if this is a nested slice (3 children) or nested access (2 children)
+            if (arrlen(node->children) == 3)
+            {
+                // Nested array slice: arr[0][1..3]
+                codegen(node->children[0], file); // Base (could be another array access)
+                fprintf(file, "[");
+                codegen(node->children[1], file); // Start index
+                fprintf(file, "..");
+                codegen(node->children[2], file); // End index
+                fprintf(file, "]");
+                // TODO: Implement nested slice if needed
+                // For now, treat as error or generate placeholder
+            }
+            else
+            {
+                // Nested access: arr[0][1]
+                codegen(node->children[0], file); // Base (could be another array access)
+                fprintf(file, "[");
+                codegen(node->children[1], file); // Index
+                fprintf(file, "]");
+            }
         }
         break;
 
@@ -1856,9 +2045,16 @@ void codegen(ASTNode *node, FILE *file)
             {
                 // arr.push(x) -> arrput(arr, x)
                 fprintf(file, "arrput(");
+                const char *array_name = NULL;
                 if (node->name)
                 {
+                    array_name = node->name;
                     fprintf(file, "%s", node->name);
+                }
+                else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF)
+                {
+                    array_name = node->children[0]->name;
+                    codegen(node->children[0], file);
                 }
                 else if (arrlen(node->children) > 0)
                 {
@@ -1870,7 +2066,59 @@ void codegen(ASTNode *node, FILE *file)
                 int value_idx = 1; // Argument is always the second child (index 1)
                 if (arrlen(node->children) > value_idx)
                 {
-                    codegen(node->children[value_idx], file);
+                    ASTNode *value_node = node->children[value_idx];
+                    // If the value is ler() (NODE_INPUT_VALUE), determine the correct read function
+                    // based on the array's element type
+                    if (value_node->type == NODE_INPUT_VALUE && array_name)
+                    {
+                        char *array_type = scope_lookup(array_name);
+                        if (array_type && array_type[0] == '[')
+                        {
+                            char *base_type = get_base_type(array_type);
+                            if (base_type)
+                            {
+                                const char *c_base = map_type(base_type);
+                                if (strcmp(c_base, "char*") == 0)
+                                {
+                                    fprintf(file, "read_string()");
+                                }
+                                else if (strcmp(c_base, "int") == 0)
+                                {
+                                    fprintf(file, "read_int()");
+                                }
+                                else if (strcmp(c_base, "long long") == 0)
+                                {
+                                    fprintf(file, "read_long()");
+                                }
+                                else if (strcmp(c_base, "float") == 0)
+                                {
+                                    fprintf(file, "read_float()");
+                                }
+                                else if (strcmp(c_base, "double") == 0)
+                                {
+                                    fprintf(file, "read_double()");
+                                }
+                                else
+                                {
+                                    // Default to int
+                                    fprintf(file, "read_int()");
+                                }
+                            }
+                            else
+                            {
+                                fprintf(file, "read_int()");
+                            }
+                        }
+                        else
+                        {
+                            // Not an array or couldn't determine type, default to int
+                            fprintf(file, "read_int()");
+                        }
+                    }
+                    else
+                    {
+                        codegen(value_node, file);
+                    }
                 }
                 fprintf(file, ")");
             }

@@ -53,6 +53,10 @@ double parse_float(const char* txt) {
 %option noyywrap
 %option yylineno
 
+/* Accept standard ASCII or any byte above 127 (UTF-8 multi-byte sequences) */
+ID_CHAR [a-zA-Z0-9_\x80-\xff]
+ID_START [a-zA-Z_\x80-\xff]
+
 %%
 
 "//".* { /* Ignore comments: Match // followed by anything */ } 
@@ -106,7 +110,7 @@ double parse_float(const char* txt) {
     return TOKEN_LIT_STRING; 
 }
 
-[a-zA-Z_][a-zA-Z0-9_]* { 
+{ID_START}{ID_CHAR}*  { 
     yylval.str = sdsnew(yytext); 
     if (debug_mode) printf("[LEX] TOKEN_ID: %s\n", yylval.str);
     return TOKEN_ID; 
