@@ -34,7 +34,7 @@ ASTNode* root_node = NULL;
 %token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW TOKEN_TRUE TOKEN_FALSE TOKEN_EMBED
 
 %left '+' '-'
-%left '*' '/'
+%left '*' '/' '%'
 %nonassoc '>' '<'
 %right '.'
 %nonassoc PROP_ACCESS
@@ -432,6 +432,12 @@ term:
     | term '/' factor {
         $$ = ast_new(NODE_BINARY_OP);
         $$->data_type = sdsnew("/");
+        ast_add_child($$, $1); // Left operand
+        ast_add_child($$, $3); // Right operand
+    }
+    | term '%' factor {
+        $$ = ast_new(NODE_BINARY_OP);
+        $$->data_type = sdsnew("%");
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }

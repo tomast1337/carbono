@@ -55,4 +55,8 @@ float string_to_real32(char* s);
 double string_to_real64(char* s);
 long double string_to_real_ext(char* s);
 
+// --- MEMORY MANAGEMENT (Arena) ---
+void* bs_alloc(size_t size);
+void bs_free_all();
+
 #endif

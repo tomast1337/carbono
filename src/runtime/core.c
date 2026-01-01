@@ -7,6 +7,49 @@
 #include "stb_ds.h"
 #include "sds.h"
 
+// --- ARENA MEMORY MANAGER ---
+typedef struct Allocation {
+    void* ptr;
+    struct Allocation* next;
+} Allocation;
+
+static Allocation* arena_head = NULL;
+
+void* bs_alloc(size_t size) {
+    // 1. Allocate object (zero-initialized)
+    void* ptr = calloc(1, size);
+    if (!ptr) {
+        fprintf(stderr, "[Basalto] Out of memory!\n");
+        exit(1);
+    }
+
+    // 2. Track it
+    Allocation* node = malloc(sizeof(Allocation));
+    if (!node) {
+        free(ptr);
+        fprintf(stderr, "[Basalto] Out of memory (tracker)!\n");
+        exit(1);
+    }
+    node->ptr = ptr;
+    node->next = arena_head;
+    
+    // 3. Link it
+    arena_head = node;
+    
+    return ptr;
+}
+
+void bs_free_all() {
+    Allocation* current = arena_head;
+    while (current) {
+        Allocation* next = current->next;
+        free(current->ptr);
+        free(current);
+        current = next;
+    }
+    arena_head = NULL;
+}
+
 // --- INPUT HELPERS ---
 
 void flush_input() { 

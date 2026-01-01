@@ -794,6 +794,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             else
             {
                 fprintf(file, "\nint main(int argc, char** argv) {\n");
+                fprintf(file, "    bs_free_all();\n");
                 fprintf(file, "    return 0;\n");
                 fprintf(file, "}\n");
             }
@@ -936,6 +937,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         }
         else
         {
+            fprintf(file, "    bs_free_all();\n");
             fprintf(file, "    return 0;\n");
             fprintf(file, "}\n");
         }
@@ -1684,9 +1686,9 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         break;
 
     case NODE_NEW:
-        // nova Node -> (Node*)calloc(1, sizeof(Node))
-        // calloc is better than malloc because it zeros memory (sets fields to NULL)
-        fprintf(file, "(%s*)calloc(1, sizeof(%s))", node->data_type, node->data_type);
+        // nova Node -> (Node*)bs_alloc(sizeof(Node))
+        // bs_alloc uses arena allocator for automatic memory management
+        fprintf(file, "(%s*)bs_alloc(sizeof(%s))", node->data_type, node->data_type);
         break;
 
     case NODE_EMBED:
