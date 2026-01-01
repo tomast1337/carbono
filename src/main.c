@@ -136,13 +136,13 @@ int main(int argc, char** argv) {
             // LIBRARY MODE: Output .so, add -shared -fPIC
             printf("[Basalto] Compiling Library '%s.so'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s %s src/runtime/core.c deps/sds.c -o %s.so -shared -fPIC -I deps -I src/runtime -Wall -ldl -lm", 
+                "gcc %s %s src/runtime/core.c deps/sds.c -o %s.so -shared -fPIC -I deps -I src -Wall -ldl -lm", 
                 c_filename, asm_filename, final_name);
         } else {
             // PROGRAM MODE: Output executable
             printf("[Basalto] Compiling Executable '%s'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s %s src/runtime/core.c deps/sds.c -o %s -I deps -I src/runtime -Wall -ldl -lm", 
+                "gcc %s %s src/runtime/core.c deps/sds.c -o %s -I deps -I src -Wall -ldl -lm", 
                 c_filename, asm_filename, final_name);
         }
         
