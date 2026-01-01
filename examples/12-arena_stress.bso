@@ -1,0 +1,39 @@
+programa "TesteArena" {
+    estrutura Node {
+        id: inteiro32
+        next: Node
+    }
+
+    escreval("--- Iniciando Teste de Memória (Arena) ---");
+
+    var head: Node = nulo;
+    var current: Node = nulo;
+    
+    // Alocar 100.000 objetos na memória
+    // Isso vai expandir a Arena dinamicamente
+    var total: inteiro32 = 100000;
+
+    cada (i: 0..total) {
+        var n: Node = nova Node;
+        n.id = i;
+        n.next = nulo;
+
+        se (head == nulo) {
+            head = n;
+            current = n;
+        } senao {
+            current.next = n;
+            current = n;
+        }
+        
+        // Feedback visual a cada 10.000 alocações
+        se (i % 10000 == 0) {
+             escreval("Alocados: ${i} nós...");
+        }
+    }
+
+    escreval("Concluído! Total de nós: ${total}");
+    escreval("Cabeça ID: ${head.id}");
+    escreval("Cauda ID: ${current.id}");
+    escreval("--- Saindo... A Arena deve liberar tudo agora. ---");
+}
