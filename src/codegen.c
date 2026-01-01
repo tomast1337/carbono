@@ -768,7 +768,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
 
         // --- 0. PREAMBLE (Same for both) ---
         // Include the runtime header
-        fprintf(file, "#include \"src/runtime/basalto.h\"\n\n");
+        fprintf(file, "#include \"basalto.h\"\n\n");
 
         // Metadata
         if (is_library)

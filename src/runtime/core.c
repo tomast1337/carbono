@@ -4,8 +4,8 @@
 #include <stdarg.h>
 
 #define STB_DS_IMPLEMENTATION
-#include "../deps/stb_ds.h"
-#include "../deps/sds.h"
+#include "stb_ds.h"
+#include "sds.h"
 
 // --- INPUT HELPERS ---
 

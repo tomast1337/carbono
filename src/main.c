@@ -3,9 +3,12 @@
 #include <string.h>
 #include <libgen.h>
 #include <limits.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "ast.h"
 #include "symtable.h"
 #include <stdbool.h>
+#include "embedded_files.h"
 
 extern int yyparse();
 extern FILE* yyin;
@@ -15,6 +18,15 @@ extern ASTNode* root_node;
 void codegen(ASTNode* node, FILE* file, FILE* asm_file, const char* source_file_path);
 
 #include "debug.h"
+
+// Helper to write embedded file content to disk
+void write_embedded_file(const char* path, const char* content) {
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%s", content);
+        fclose(f);
+    }
+}
 
 // Global debug flag (accessible from lexer)
 bool debug_mode = false;
@@ -64,14 +76,44 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    // 2. Open Input
+    // 2. SETUP RUNTIME ENVIRONMENT
+    // Create a temp directory for the runtime
+    const char* tmp_dir = "/tmp/basalto_runtime";
+    #ifdef _WIN32
+        mkdir(tmp_dir);
+    #else
+        mkdir(tmp_dir, 0777);
+    #endif
+
+    // Extract the embedded files
+    char path_buf[512];
+    
+    sprintf(path_buf, "%s/basalto.h", tmp_dir);
+    write_embedded_file(path_buf, SRC_BASALTO_H);
+
+    sprintf(path_buf, "%s/core.c", tmp_dir);
+    write_embedded_file(path_buf, SRC_CORE_C);
+
+    sprintf(path_buf, "%s/sds.h", tmp_dir);
+    write_embedded_file(path_buf, SRC_SDS_H);
+
+    sprintf(path_buf, "%s/sds.c", tmp_dir);
+    write_embedded_file(path_buf, SRC_SDS_C);
+
+    sprintf(path_buf, "%s/stb_ds.h", tmp_dir);
+    write_embedded_file(path_buf, SRC_STB_DS_H);
+
+    sprintf(path_buf, "%s/sdsalloc.h", tmp_dir);
+    write_embedded_file(path_buf, SRC_SDSALLOC_H);
+
+    // 3. Open Input
     yyin = fopen(input_filename, "r");
     if (!yyin) {
         fprintf(stderr, "[Basalto] Error: Could not open file %s\n", input_filename);
         return EXIT_FAILURE;
     }
 
-    // 3. Parse (Build AST)
+    // 4. Parse (Build AST)
     if (debug_mode) printf("[Basalto] Parsing...\n");
     scope_enter();
     if (yyparse() != 0) {
@@ -89,7 +131,7 @@ int main(int argc, char** argv) {
         print_ast(root_node);
     }
 
-    // 4. Determine Output Name & Type
+    // 5. Determine Output Name & Type
     // Priority: CLI Flag (-o) > Program/Library Name > Default "output"
     const char* final_name = "output";
     int is_library = (root_node->type == NODE_LIBRARY);
@@ -101,13 +143,13 @@ int main(int argc, char** argv) {
         final_name = root_node->name;
     }
 
-    // 5. Generate C File Name AND ASM File Name
+    // 6. Generate C File Name AND ASM File Name
     char c_filename[256];
     char asm_filename[256];
     snprintf(c_filename, sizeof(c_filename), "%s.c", final_name);
     snprintf(asm_filename, sizeof(asm_filename), "%s_embeds.S", final_name);
 
-    // 6. Generate Code
+    // 7. Generate Code
     if (debug_mode) printf("[Basalto] Generating %s and %s...\n", c_filename, asm_filename);
     
     FILE* out_c = fopen(c_filename, "w");
@@ -126,24 +168,24 @@ int main(int argc, char** argv) {
     fclose(out_c);
     fclose(out_asm);
 
-    // 7. Compile with GCC (unless --emit-c is set)
+    // 8. Compile with GCC (unless --emit-c is set)
     if (transpile_only) {
         printf("[Basalto] Transpilation complete: %s\n", c_filename);
     } else {
-        char cmd[1024];
+        char cmd[2048]; // Bump size just in case
         
         if (is_library) {
             // LIBRARY MODE: Output .so, add -shared -fPIC
             printf("[Basalto] Compiling Library '%s.so'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s %s src/runtime/core.c deps/sds.c -o %s.so -shared -fPIC -I deps -I src -Wall -ldl -lm", 
-                c_filename, asm_filename, final_name);
+                "gcc %s %s %s/core.c %s/sds.c -o %s.so -shared -fPIC -I %s -Wall -ldl -lm", 
+                c_filename, asm_filename, tmp_dir, tmp_dir, final_name, tmp_dir);
         } else {
             // PROGRAM MODE: Output executable
             printf("[Basalto] Compiling Executable '%s'...\n", final_name);
             snprintf(cmd, sizeof(cmd), 
-                "gcc %s %s src/runtime/core.c deps/sds.c -o %s -I deps -I src -Wall -ldl -lm", 
-                c_filename, asm_filename, final_name);
+                "gcc %s %s %s/core.c %s/sds.c -o %s -I %s -Wall -ldl -lm", 
+                c_filename, asm_filename, tmp_dir, tmp_dir, final_name, tmp_dir);
         }
         
         if (debug_mode) printf("[CMD] %s\n", cmd);
@@ -159,7 +201,7 @@ int main(int argc, char** argv) {
         } else {
             printf("[Basalto] Build successful: ./%s\n", final_name);
             
-            // 8. Run the program if --run flag is set
+            // 9. Run the program if --run flag is set
             if (run_after_compile) {
                 printf("[Basalto] Running ./%s...\n", final_name);
                 char run_cmd[512];

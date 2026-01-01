@@ -6,8 +6,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <dlfcn.h>
-#include "sds.h"      // Works because of -I deps
-#include "stb_ds.h"   // Works because of -I deps
+#include "sds.h"
+#include "stb_ds.h"
 
 // Macro must be in header so it expands in the user code
 #define print_any(x) _Generic((x), \
