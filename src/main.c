@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <libgen.h>
+#include <limits.h>
 #include "ast.h"
 #include "symtable.h"
 #include <stdbool.h>
@@ -10,7 +12,7 @@ extern FILE* yyin;
 extern ASTNode* root_node;
 
 // Declaration from codegen.c
-void codegen(ASTNode* node, FILE* file, FILE* asm_file);
+void codegen(ASTNode* node, FILE* file, FILE* asm_file, const char* source_file_path);
 
 #include "debug.h"
 
@@ -118,8 +120,8 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     
-    // Pass BOTH files to codegen
-    codegen(root_node, out_c, out_asm);
+    // Pass BOTH files and source path to codegen
+    codegen(root_node, out_c, out_asm, input_filename);
     
     fclose(out_c);
     fclose(out_asm);

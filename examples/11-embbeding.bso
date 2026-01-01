@@ -1,0 +1,4 @@
+programa "Incorporar" {
+    var data: texto = incorporar "11-dados.txt";
+    escreval(data);
+}
