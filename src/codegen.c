@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
-#include <ctype.h>
-#include <libgen.h>
-#include <limits.h>
-#include <stdlib.h>
 #include "ast.h"
 #include "symtable.h"
 
@@ -130,77 +126,8 @@ const char *map_type(const char *type)
     return "void"; // fallback
 }
 
-// Helper to sanitize filename into a C identifier (path/to/file.png -> path_to_file_png)
-sds sanitize_symbol(const char* path) {
-    sds s = sdsnew(path);
-    for (int i=0; i<sdslen(s); i++) {
-        if (!isalnum(s[i])) s[i] = '_';
-    }
-    return s;
-}
-
-// Helper to resolve embed path relative to source file location
-sds resolve_embed_path(const char* embed_path, const char* source_file_path) {
-    if (!source_file_path) {
-        // Fallback: use embed_path as-is if no source path
-        return sdsnew(embed_path);
-    }
-    
-    // First, resolve the source file path to absolute
-    char* abs_source = realpath(source_file_path, NULL);
-    char* source_dir_copy = NULL;
-    
-    if (abs_source) {
-        // Source file exists, get its directory
-        source_dir_copy = strdup(abs_source);
-        char* source_dir = dirname(source_dir_copy);
-        
-        // Build the resolved path: source_dir/embed_path
-        sds resolved = sdsnew(source_dir);
-        resolved = sdscat(resolved, "/");
-        resolved = sdscat(resolved, embed_path);
-        
-        // Try to get absolute path of the embed file
-        char* abs_path = realpath(resolved, NULL);
-        if (abs_path) {
-            sdsfree(resolved);
-            resolved = sdsnew(abs_path);
-            free(abs_path);
-        }
-        // If realpath fails, use the absolute path we built from source_dir
-        
-        free(abs_source);
-        free(source_dir_copy);
-        return resolved;
-    } else {
-        // Source file path couldn't be resolved, work with relative path
-        char* source_copy = strdup(source_file_path);
-        char* source_dir = dirname(source_copy);
-        
-        // Build the resolved path: source_dir/embed_path
-        sds resolved = sdsnew(source_dir);
-        // Only add "/" if source_dir is not "." (current directory)
-        if (strcmp(source_dir, ".") != 0) {
-            resolved = sdscat(resolved, "/");
-        }
-        resolved = sdscat(resolved, embed_path);
-        
-        // Try to resolve to absolute path
-        char* abs_path = realpath(resolved, NULL);
-        if (abs_path) {
-            sdsfree(resolved);
-            resolved = sdsnew(abs_path);
-            free(abs_path);
-        }
-        // If realpath fails, use the path we built
-        
-        free(source_copy);
-        return resolved;
-    }
-}
-
 // Forward declaration
-void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_path);
+void codegen(ASTNode *node, FILE *file);
 
 // Helper to generate function signatures (e.g. "int sum(int a, int b)")
 void codegen_func_signature(ASTNode *node, FILE *file)
@@ -384,194 +311,49 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
                 // Replace .len or ->len with arrlen()
                 char saved_char = *len_pos;
                 *len_pos = '\0'; // Terminate at .len or ->len
-                
-                // Convert property access in expr_buffer (e.g., "p.filhos" -> "p->filhos")
-                char converted_expr[256] = {0};
-                char *dot = strchr(expr_buffer, '.');
-                if (dot)
-                {
-                    *dot = '\0';
-                    char *obj = expr_buffer;
-                    char *prop = dot + 1;
-                    
-                    if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
-                    {
-                        snprintf(converted_expr, 255, "%s->%s", obj, prop);
-                    }
-                    else
-                    {
-                        // Check if obj is a pointer type in symbol table
-                        char *var_type = scope_lookup(obj);
-                        int is_ptr = 0;
-                        if (var_type)
-                        {
-                            size_t len = strlen(var_type);
-                            if (len > 0 && var_type[len - 1] == '*')
-                            {
-                                is_ptr = 1;
-                            }
-                            else if (is_struct_type(var_type))
-                            {
-                                // REFERENCE SEMANTICS: Structs are always pointers
-                                is_ptr = 1;
-                            }
-                        }
-                        if (is_ptr)
-                        {
-                            snprintf(converted_expr, 255, "%s->%s", obj, prop);
-                        }
-                        else
-                        {
-                            snprintf(converted_expr, 255, "%s.%s", obj, prop);
-                        }
-                    }
-                }
-                else
-                {
-                    strcpy(converted_expr, expr_buffer);
-                }
-                
-                snprintf(final_expr, 255, "arrlen(%s)", converted_expr);
+                snprintf(final_expr, 255, "arrlen(%s)", expr_buffer);
                 *len_pos = saved_char; // Restore for safety (though we won't use it)
             }
             else
             {
-                // Find first [ to detect array access
-                char *first_bracket = strchr(expr_buffer, '[');
+                // Find last . or -> before any [
+                char *last_dot = strrchr(expr_buffer, '.');
+                char *last_arrow = strrchr(expr_buffer, '>');
+                char *last_bracket = strrchr(expr_buffer, ']');
                 
-                // Check if we have property access followed by array access
-                // e.g., p.filhos[i] -> p->filhos[i]
-                if (first_bracket)
+                // Check if we have array access followed by property access
+                // e.g., p->filhos[i].nome
+                if (last_bracket && (last_dot || last_arrow))
                 {
-                    // Find the last . before the first [
-                    char *dot_before_bracket = NULL;
-                    for (char *p = expr_buffer; p < first_bracket; p++)
+                    // Determine which operator was used
+                    char *prop_op = NULL;
+                    if (last_arrow && (!last_dot || last_arrow > last_dot))
                     {
-                        if (*p == '.')
+                        prop_op = last_arrow - 1; // Points to '-'
+                        if (*prop_op == '-' && last_arrow > expr_buffer && last_arrow[-1] == '-')
                         {
-                            dot_before_bracket = p;
+                            // Found -> operator
+                            *prop_op = '\0'; // Terminate before ->
+                            char *obj = expr_buffer;
+                            char *prop = last_arrow + 1;
+                            snprintf(final_expr, 255, "%s->%s", obj, prop);
                         }
                     }
-                    
-                    if (dot_before_bracket)
+                    else if (last_dot)
                     {
-                        // Property access before array access: convert . to ->
-                        *dot_before_bracket = '\0';
+                        // Array access with . operator: use -> for struct arrays
+                        *last_dot = '\0';
                         char *obj = expr_buffer;
-                        char *rest = dot_before_bracket + 1; // This includes the property name and [i]
-                        
-                        // Build the converted expression
-                        char temp_expr[256] = {0};
-                        if (strcmp(obj, "self") == 0 || strcmp(obj, "eu") == 0)
-                        {
-                            snprintf(temp_expr, 255, "%s->%s", obj, rest);
-                        }
-                        else
-                        {
-                            // Check if obj is a pointer type in symbol table
-                            char *var_type = scope_lookup(obj);
-                            int is_ptr = 0;
-                            if (var_type)
-                            {
-                                size_t len = strlen(var_type);
-                                if (len > 0 && var_type[len - 1] == '*')
-                                {
-                                    is_ptr = 1;
-                                }
-                                else if (is_struct_type(var_type))
-                                {
-                                    // REFERENCE SEMANTICS: Structs are always pointers
-                                    is_ptr = 1;
-                                }
-                            }
-                            if (is_ptr)
-                            {
-                                snprintf(temp_expr, 255, "%s->%s", obj, rest);
-                            }
-                            else
-                            {
-                                snprintf(temp_expr, 255, "%s.%s", obj, rest);
-                            }
-                        }
-                        
-                        // Now check if there's a dot after the bracket (e.g., p->filhos[i].nome)
-                        // Find the matching ']' for the first '['
-                        char *matching_bracket = strchr(temp_expr, '[');
-                        if (matching_bracket)
-                        {
-                            int bracket_depth = 1;
-                            char *bracket = matching_bracket + 1;
-                            while (*bracket != '\0' && bracket_depth > 0)
-                            {
-                                if (*bracket == '[') bracket_depth++;
-                                else if (*bracket == ']') bracket_depth--;
-                                bracket++;
-                            }
-                            
-                            // Now look for . after the matching ]
-                            if (bracket_depth == 0 && *(bracket - 1) == ']')
-                            {
-                                char *dot_after = strchr(bracket - 1, '.');
-                                if (dot_after)
-                                {
-                                    // Convert . to -> after array access
-                                    *dot_after = '\0';
-                                    char *array_part = temp_expr;
-                                    char *prop_part = dot_after + 1;
-                                    snprintf(final_expr, 255, "%s->%s", array_part, prop_part);
-                                }
-                                else
-                                {
-                                    strcpy(final_expr, temp_expr);
-                                }
-                            }
-                            else
-                            {
-                                strcpy(final_expr, temp_expr);
-                            }
-                        }
-                        else
-                        {
-                            strcpy(final_expr, temp_expr);
-                        }
+                        char *prop = last_dot + 1;
+                        snprintf(final_expr, 255, "%s->%s", obj, prop);
                     }
                     else
                     {
-                        // No dot before bracket - check for array access followed by property access
-                        // Simple approach: find any ']' and check if there's a '.' after it
-                        char *bracket = first_bracket;
-                        char *dot_after_bracket = NULL;
-                        while (*bracket != '\0')
-                        {
-                            if (*bracket == ']')
-                            {
-                                char *dot = strchr(bracket + 1, '.');
-                                if (dot && (!dot_after_bracket || dot < dot_after_bracket))
-                                {
-                                    dot_after_bracket = dot;
-                                }
-                            }
-                            bracket++;
-                        }
-                        
-                        if (dot_after_bracket)
-                        {
-                            // Array access followed by property access: p->filhos[i].nome -> p->filhos[i]->nome
-                            // Arrays of structs return pointers, so always use ->
-                            *dot_after_bracket = '\0';
-                            char *obj = expr_buffer;
-                            char *prop = dot_after_bracket + 1;
-                            snprintf(final_expr, 255, "%s->%s", obj, prop);
-                        }
-                        else
-                        {
-                            strcpy(final_expr, expr_buffer);
-                        }
+                        strcpy(final_expr, expr_buffer);
                     }
                 }
                 else
                 {
-                    // Simple property access: p.field
                     char *dot = strchr(expr_buffer, '.');
                     if (dot)
                     {
@@ -593,11 +375,6 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
                                 size_t len = strlen(var_type);
                                 if (len > 0 && var_type[len - 1] == '*')
                                 {
-                                    is_ptr = 1;
-                                }
-                                else if (is_struct_type(var_type))
-                                {
-                                    // REFERENCE SEMANTICS: Structs are always pointers
                                     is_ptr = 1;
                                 }
                             }
@@ -728,7 +505,7 @@ static void codegen_string_literal(const char *raw_str, FILE *file)
     fprintf(file, "_s; })");
 }
 
-void codegen_block(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_path)
+void codegen_block(ASTNode *node, FILE *file)
 {
     fprintf(file, "{\n");
     scope_enter(); // Push new scope for this block
@@ -740,12 +517,12 @@ void codegen_block(ASTNode *node, FILE *file, FILE *asm_file, const char* source
         if (child->type == NODE_METHOD_CALL)
         {
             fprintf(file, "    ");
-            codegen(child, file, asm_file, source_file_path);
+            codegen(child, file);
             fprintf(file, ";\n");
         }
         else
         {
-            codegen(child, file, asm_file, source_file_path);
+            codegen(child, file);
         }
     }
 
@@ -753,7 +530,7 @@ void codegen_block(ASTNode *node, FILE *file, FILE *asm_file, const char* source
     fprintf(file, "}\n");
 }
 
-void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_path)
+void codegen(ASTNode *node, FILE *file)
 {
     if (!node)
         return;
@@ -767,8 +544,100 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         scope_enter(); // Global Scope
 
         // --- 0. PREAMBLE (Same for both) ---
-        // Include the runtime header
-        fprintf(file, "#include \"basalto.h\"\n\n");
+        fprintf(file, "#include <stdio.h>\n");
+        fprintf(file, "#include <stdlib.h>\n");
+        fprintf(file, "#include <string.h>\n");
+        fprintf(file, "#include <stdarg.h>\n");
+        fprintf(file, "#include <dlfcn.h>\n");
+        fprintf(file, "#include \"sds.h\"\n");
+        fprintf(file, "#define STB_DS_IMPLEMENTATION\n");
+        fprintf(file, "#include \"stb_ds.h\"\n\n");
+        fprintf(file, "// Auto-typing macro for printf\n");
+        fprintf(file, "#define print_any(x) _Generic((x), \\\n");
+        fprintf(file, "    int: \"%%d\", \\\n");
+        fprintf(file, "    long long: \"%%lld\", \\\n");
+        fprintf(file, "    short: \"%%hd\", \\\n");
+        fprintf(file, "    float: \"%%f\", \\\n");
+        fprintf(file, "    double: \"%%f\", \\\n");
+        fprintf(file, "    char*: \"%%s\", \\\n");
+        fprintf(file, "    char: \"%%c\", \\\n");
+        fprintf(file, "    default: \"%%d\")\n\n");
+        fprintf(file, "// Input System Runtime Helpers\n");
+        fprintf(file, "void flush_input() { \n");
+        fprintf(file, "    int c; \n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF); \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "int read_int() { \n");
+        fprintf(file, "    int x; scanf(\"%%d\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "long long read_long() { \n");
+        fprintf(file, "    long long x; scanf(\"%%lld\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "float read_float() { \n");
+        fprintf(file, "    float x; scanf(\"%%f\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "double read_double() { \n");
+        fprintf(file, "    double x; scanf(\"%%lf\", &x); flush_input(); return x; \n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "char* read_string() {\n");
+        fprintf(file, "    sds line = sdsempty();\n");
+        fprintf(file, "    int c;\n");
+        fprintf(file, "    while ((c = getchar()) != '\\n' && c != EOF) {\n");
+        fprintf(file, "        char ch = (char)c;\n");
+        fprintf(file, "        line = sdscatlen(line, &ch, 1);\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    return line;\n");
+        fprintf(file, "}\n\n");
+        fprintf(file, "void wait_enter() {\n");
+        //fprintf(file, "    printf(\"Pressione ENTER para continuar...\");\n");
+        fprintf(file, "    flush_input();\n");
+        fprintf(file, "}\n\n");
+
+        // --- CONVERSION HELPERS ---
+        fprintf(file, "// Primitives to String conversions\n");
+        fprintf(file, "sds int8_to_string(signed char x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int16_to_string(short x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int32_to_string(int x) { return sdscatprintf(sdsempty(), \"%%d\", x); }\n");
+        fprintf(file, "sds int64_to_string(long long x) { return sdscatprintf(sdsempty(), \"%%lld\", x); }\n");
+        fprintf(file, "sds int_arq_to_string(long x) { return sdscatprintf(sdsempty(), \"%%ld\", x); }\n");
+        fprintf(file, "sds float32_to_string(float x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float64_to_string(double x) { return sdscatprintf(sdsempty(), \"%%f\", x); }\n");
+        fprintf(file, "sds float_ext_to_string(long double x) { return sdscatprintf(sdsempty(), \"%%Lf\", x); }\n");
+        fprintf(file, "sds char_to_string(char* x) { return sdsnew(x); }\n"); // Copy
+        fprintf(file, "sds array_int_to_string(int* arr) {\n");
+        fprintf(file, "    if (!arr || arrlen(arr) == 0) return sdsnew(\"[]\");\n");
+        fprintf(file, "    sds result = sdsnew(\"[\");\n");
+        fprintf(file, "    for (int i = 0; i < arrlen(arr); i++) {\n");
+        fprintf(file, "        if (i > 0) result = sdscat(result, \", \");\n");
+        fprintf(file, "        result = sdscatprintf(result, \"%%d\", arr[i]);\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    result = sdscat(result, \"]\");\n");
+        fprintf(file, "    return result;\n");
+        fprintf(file, "}\n");
+        fprintf(file, "sds array_string_to_string(char** arr) {\n");
+        fprintf(file, "    if (!arr || arrlen(arr) == 0) return sdsnew(\"[]\");\n");
+        fprintf(file, "    sds result = sdsnew(\"[\");\n");
+        fprintf(file, "    for (int i = 0; i < arrlen(arr); i++) {\n");
+        fprintf(file, "        if (i > 0) result = sdscat(result, \", \");\n");
+        fprintf(file, "        result = sdscat(result, \"\\\"\");\n");
+        fprintf(file, "        if (arr[i]) result = sdscat(result, arr[i]);\n");
+        fprintf(file, "        result = sdscat(result, \"\\\"\");\n");
+        fprintf(file, "    }\n");
+        fprintf(file, "    result = sdscat(result, \"]\");\n");
+        fprintf(file, "    return result;\n");
+        fprintf(file, "}\n");
+        fprintf(file, "\n");
+
+        fprintf(file, "// String to Primitives conversions\n");
+        fprintf(file, "signed char string_to_int8(char* s) { return (signed char)atoi(s); }\n");
+        fprintf(file, "short string_to_int16(char* s) { return (short)atoi(s); }\n");
+        fprintf(file, "int string_to_int32(char* s) { return atoi(s); }\n");
+        fprintf(file, "long long string_to_int64(char* s) { return atoll(s); }\n");
+        fprintf(file, "long string_to_int_arq(char* s) { return atol(s); }\n");
+        fprintf(file, "float string_to_real32(char* s) { return (float)atof(s); }\n");
+        fprintf(file, "double string_to_real64(char* s) { return atof(s); }\n");
+        fprintf(file, "long double string_to_real_ext(char* s) { return (long double)atof(s); }\n");
+        fprintf(file, "\n");
 
         // Metadata
         if (is_library)
@@ -794,7 +663,6 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             else
             {
                 fprintf(file, "\nint main(int argc, char** argv) {\n");
-                fprintf(file, "    bs_free_all();\n");
                 fprintf(file, "    return 0;\n");
                 fprintf(file, "}\n");
             }
@@ -807,7 +675,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         {
             if (content_block->children[i]->type == NODE_STRUCT_DEF)
             {
-                    codegen(content_block->children[i], file, asm_file, source_file_path);
+                codegen(content_block->children[i], file);
             }
         }
 
@@ -858,7 +726,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         {
             if (content_block->children[i]->type == NODE_FUNC_DEF)
             {
-                    codegen(content_block->children[i], file, asm_file, source_file_path);
+                codegen(content_block->children[i], file);
             }
         }
 
@@ -920,12 +788,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 if (child->type == NODE_METHOD_CALL)
                 {
                     fprintf(file, "    ");
-                    codegen(child, file, asm_file, source_file_path);
+                    codegen(child, file);
                     fprintf(file, ";\n");
                 }
                 else
                 {
-                    codegen(child, file, asm_file, source_file_path);
+                    codegen(child, file);
                 }
             }
         }
@@ -937,7 +805,6 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         }
         else
         {
-            fprintf(file, "    bs_free_all();\n");
             fprintf(file, "    return 0;\n");
             fprintf(file, "}\n");
         }
@@ -947,7 +814,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
     break;
 
     case NODE_BLOCK:
-        codegen_block(node, file, asm_file, source_file_path);
+        codegen_block(node, file);
         break;
 
     case NODE_VAR_DECL:
@@ -1066,7 +933,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     else
                     {
                         // codegen_string_literal returns sds directly (statement expression)
-                        codegen(init_node, file, asm_file, source_file_path);
+                        codegen(init_node, file);
                     }
                 }
                 else if (strcmp(var_type, "char") == 0)
@@ -1083,7 +950,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else
                 {
-                    codegen(init_node, file, asm_file, source_file_path);
+                    codegen(init_node, file);
                 }
             }
             else if (init_node->type == NODE_ARRAY_LITERAL)
@@ -1130,7 +997,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                             for (int j = 0; j < arrlen(row->children); j++)
                             {
                                 fprintf(file, "        arrput(row_%d, ", i);
-                                codegen(row->children[j], file, asm_file, source_file_path);
+                                codegen(row->children[j], file);
                                 fprintf(file, ");\n");
                             }
                             fprintf(file, "        arrput(%s, row_%d);\n", node->name, i);
@@ -1140,7 +1007,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                         {
                             // Single element (shouldn't happen in nested, but handle it)
                             fprintf(file, "    arrput(%s, ", node->name);
-                            codegen(row, file, asm_file, source_file_path);
+                            codegen(row, file);
                             fprintf(file, ");\n");
                         }
                     }
@@ -1151,7 +1018,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     for (int i = 0; i < arrlen(init_node->children); i++)
                     {
                         fprintf(file, "    arrput(%s, ", node->name);
-                        codegen(init_node->children[i], file, asm_file, source_file_path);
+                        codegen(init_node->children[i], file);
                         fprintf(file, ");\n");
                     }
                 }
@@ -1159,7 +1026,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else
             {
-                codegen(init_node, file, asm_file, source_file_path);
+                codegen(init_node, file);
             }
         }
         fprintf(file, ";\n");
@@ -1188,14 +1055,14 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     {
                         // Generate as regular assignment: var = var.field
                         fprintf(file, "%s = ", var_name);
-                        codegen(prop, file, asm_file, source_file_path);
+                        codegen(prop, file);
                         fprintf(file, ";\n");
                         break; // Skip the rest of the property access assignment handling
                     }
                 }
             }
 
-            codegen(prop, file, asm_file, source_file_path);
+            codegen(prop, file);
             fprintf(file, " = ");
             // Value is in children[1] (children[0] is the property access)
             if (arrlen(node->children) > 1)
@@ -1366,7 +1233,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     {
                         fprintf(file, "&");
                     }
-                    codegen(value_node, file, asm_file, source_file_path);
+                    codegen(value_node, file);
                 }
             }
         }
@@ -1374,7 +1241,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         {
             // Array access assignment: arr[i] = expr
             ASTNode *arr_access = node->children[0];
-            codegen(arr_access, file, asm_file, source_file_path);
+            codegen(arr_access, file);
             fprintf(file, " = ");
             // Value is in children[1] (children[0] is the array access)
             if (arrlen(node->children) > 1)
@@ -1386,7 +1253,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else
                 {
-                    codegen(value_node, file, asm_file, source_file_path);
+                    codegen(value_node, file);
                 }
             }
         }
@@ -1436,7 +1303,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else
                 {
-                    codegen(value_node, file, asm_file, source_file_path);
+                    codegen(value_node, file);
                 }
             }
         }
@@ -1464,17 +1331,17 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             fprintf(file, "%s %s ", node->name, op);
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Right-hand expression
+                codegen(node->children[0], file); // Right-hand expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // The if block
+                codegen(node->children[1], file); // The if block
             }
             if (arrlen(node->children) > 2)
             {
                 fprintf(file, " else ");
-                codegen(node->children[2], file, asm_file, source_file_path); // The else block
+                codegen(node->children[2], file); // The else block
             }
         }
         else if (node->data_type && arrlen(node->children) >= 3 && 
@@ -1486,22 +1353,22 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             const char *op = node->data_type;
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Left-hand expression
+                codegen(node->children[0], file); // Left-hand expression
             }
             fprintf(file, " %s ", op);
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // Right-hand expression
+                codegen(node->children[1], file); // Right-hand expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 2)
             {
-                codegen(node->children[2], file, asm_file, source_file_path); // The if block
+                codegen(node->children[2], file); // The if block
             }
             if (arrlen(node->children) > 3)
             {
                 fprintf(file, " else ");
-                codegen(node->children[3], file, asm_file, source_file_path); // The else block
+                codegen(node->children[3], file); // The else block
             }
         }
         else
@@ -1509,17 +1376,17 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             // Format 2: Complex expression (comparison_expr or logical_expr as single child)
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Full condition expression
+                codegen(node->children[0], file); // Full condition expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // The if block
+                codegen(node->children[1], file); // The if block
             }
             if (arrlen(node->children) > 2)
             {
                 fprintf(file, " else ");
-                codegen(node->children[2], file, asm_file, source_file_path); // The else block
+                codegen(node->children[2], file); // The else block
             }
         }
         fprintf(file, "\n");
@@ -1544,12 +1411,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             fprintf(file, "%s %s ", node->name, op_while);
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Right-hand expression
+                codegen(node->children[0], file); // Right-hand expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // The block
+                codegen(node->children[1], file); // The block
             }
         }
         else if (node->data_type && arrlen(node->children) >= 3 &&
@@ -1561,17 +1428,17 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             const char *op_while = node->data_type;
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Left-hand expression
+                codegen(node->children[0], file); // Left-hand expression
             }
             fprintf(file, " %s ", op_while);
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // Right-hand expression
+                codegen(node->children[1], file); // Right-hand expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 2)
             {
-                codegen(node->children[2], file, asm_file, source_file_path); // The block
+                codegen(node->children[2], file); // The block
             }
         }
         else
@@ -1579,12 +1446,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             // Format 2: Complex expression (comparison_expr or logical_expr as single child)
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path); // Full condition expression
+                codegen(node->children[0], file); // Full condition expression
             }
             fprintf(file, ") ");
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path); // The block
+                codegen(node->children[1], file); // The block
             }
         }
         fprintf(file, "\n");
@@ -1608,12 +1475,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 fprintf(file, "    printf(print_any(");
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, "), ");
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, ");\n");
                 fprintf(file, "    printf(\"\\n\");\n");
@@ -1636,12 +1503,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 fprintf(file, "    printf(print_any(");
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, "), ");
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, ");\n");
             }
@@ -1655,7 +1522,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             {
                 if (i > 0)
                     fprintf(file, ", ");
-                codegen(node->children[i], file, asm_file, source_file_path);
+                codegen(node->children[i], file);
             }
             fprintf(file, ")");
         }
@@ -1686,39 +1553,9 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         break;
 
     case NODE_NEW:
-        // nova Node -> (Node*)bs_alloc(sizeof(Node))
-        // bs_alloc uses arena allocator for automatic memory management
-        fprintf(file, "(%s*)bs_alloc(sizeof(%s))", node->data_type, node->data_type);
-        break;
-
-    case NODE_EMBED:
-        if (asm_file) {
-            // Resolve the embed path relative to source file location
-            sds resolved_path = resolve_embed_path(node->string_value, source_file_path);
-            sds sym = sanitize_symbol(node->string_value);
-            
-            // Write to Assembly File
-            // .global _binary_sym_start
-            // .global _binary_sym_end
-            fprintf(asm_file, ".global _binary_%s_start\n", sym);
-            fprintf(asm_file, ".global _binary_%s_end\n", sym);
-            fprintf(asm_file, "_binary_%s_start:\n", sym);
-            fprintf(asm_file, "    .incbin \"%s\"\n", resolved_path);
-            fprintf(asm_file, "_binary_%s_end:\n", sym);
-            fprintf(asm_file, "    .byte 0\n\n"); // Safety null terminator
-
-            // Write to C File
-            // Statement expression to wrap the externs and return an SDS string
-            fprintf(file, "({\n");
-            fprintf(file, "    extern char _binary_%s_start[];\n", sym);
-            fprintf(file, "    extern char _binary_%s_end[];\n", sym);
-            fprintf(file, "    size_t size = _binary_%s_end - _binary_%s_start;\n", sym, sym);
-            fprintf(file, "    sdsnewlen(_binary_%s_start, size);\n", sym);
-            fprintf(file, "})");
-            
-            sdsfree(sym);
-            sdsfree(resolved_path);
-        }
+        // nova Node -> (Node*)calloc(1, sizeof(Node))
+        // calloc is better than malloc because it zeros memory (sets fields to NULL)
+        fprintf(file, "(%s*)calloc(1, sizeof(%s))", node->data_type, node->data_type);
         break;
 
     case NODE_VAR_REF:
@@ -1733,7 +1570,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "%s", unary_op);
         if (arrlen(node->children) > 0)
         {
-            codegen(node->children[0], file, asm_file, source_file_path);
+            codegen(node->children[0], file);
         }
         break;
 
@@ -1771,12 +1608,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             fprintf(file, "sdscat(");
             if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ", ");
             if (arrlen(node->children) > 1)
             {
-                codegen(node->children[1], file, asm_file, source_file_path);
+                codegen(node->children[1], file);
             }
             fprintf(file, ")");
         }
@@ -1809,12 +1646,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     fprintf(file, "(strcmp(");
                     if (arrlen(node->children) > 0)
                     {
-                        codegen(node->children[0], file, asm_file, source_file_path);
+                        codegen(node->children[0], file);
                     }
                     fprintf(file, ", ");
                     if (arrlen(node->children) > 1)
                     {
-                        codegen(node->children[1], file, asm_file, source_file_path);
+                        codegen(node->children[1], file);
                     }
                     fprintf(file, ") == 0)");
                 }
@@ -1823,12 +1660,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     fprintf(file, "(strcmp(");
                     if (arrlen(node->children) > 0)
                     {
-                        codegen(node->children[0], file, asm_file, source_file_path);
+                        codegen(node->children[0], file);
                     }
                     fprintf(file, ", ");
                     if (arrlen(node->children) > 1)
                     {
-                        codegen(node->children[1], file, asm_file, source_file_path);
+                        codegen(node->children[1], file);
                     }
                     fprintf(file, ") != 0)");
                 }
@@ -1839,12 +1676,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 fprintf(file, "(");
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, " %s ", bin_op);
                 if (arrlen(node->children) > 1)
                 {
-                    codegen(node->children[1], file, asm_file, source_file_path);
+                    codegen(node->children[1], file);
                 }
                 fprintf(file, ")");
             }
@@ -1855,7 +1692,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "    while(1) ");
         if (arrlen(node->children) > 0)
         {
-            codegen(node->children[0], file, asm_file, source_file_path); // Block
+            codegen(node->children[0], file); // Block
         }
         fprintf(file, "\n");
         break;
@@ -1876,7 +1713,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "    for (%s %s = ", c_type, node->cada_var ? node->cada_var : "i");
         if (node->start)
         {
-            codegen(node->start, file, asm_file, source_file_path);
+            codegen(node->start, file);
         }
         else
         {
@@ -1887,7 +1724,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "; %s < ", node->cada_var ? node->cada_var : "i");
         if (node->end)
         {
-            codegen(node->end, file, asm_file, source_file_path);
+            codegen(node->end, file);
         }
         else
         {
@@ -1898,7 +1735,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "; %s += ", node->cada_var ? node->cada_var : "i");
         if (node->step)
         {
-            codegen(node->step, file, asm_file, source_file_path);
+            codegen(node->step, file);
         }
         else
         {
@@ -1908,7 +1745,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, ") ");
         if (arrlen(node->children) > 0)
         {
-            codegen(node->children[0], file, asm_file, source_file_path); // Block
+            codegen(node->children[0], file); // Block
         }
         fprintf(file, "\n");
         break;
@@ -1965,7 +1802,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         for (int i = 0; i < arrlen(node->children); i++)
         {
             fprintf(file, "        arrput(temp_arr_%d, ", temp_id);
-            codegen(node->children[i], file, asm_file, source_file_path);
+            codegen(node->children[i], file);
             fprintf(file, ");\n");
         }
         fprintf(file, "        temp_arr_%d;\n", temp_id);
@@ -1995,10 +1832,10 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     fprintf(file, "({\n");
                     fprintf(file, "        %s* slice_arr_%d = NULL;\n", c_base, slice_id);
                     fprintf(file, "        int start_idx_%d = ", slice_id);
-                    codegen(node->children[0], file, asm_file, source_file_path); // Start index
+                    codegen(node->children[0], file); // Start index
                     fprintf(file, ";\n");
                     fprintf(file, "        int end_idx_%d = ", slice_id);
-                    codegen(node->children[1], file, asm_file, source_file_path); // End index
+                    codegen(node->children[1], file); // End index
                     fprintf(file, ";\n");
                     fprintf(file, "        int len_%d = arrlen(%s);\n", slice_id, array_name);
                     fprintf(file, "        if (start_idx_%d < 0) start_idx_%d = 0;\n", slice_id, slice_id);
@@ -2015,7 +1852,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 {
                     // Fallback if type not found
                     fprintf(file, "%s[", array_name);
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                     fprintf(file, "]");
                 }
             }
@@ -2025,7 +1862,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 fprintf(file, "%s[", node->name);
                 if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path); // Index
+                    codegen(node->children[0], file); // Index
                 }
                 fprintf(file, "]");
             }
@@ -2036,11 +1873,11 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             if (arrlen(node->children) == 3)
             {
                 // Nested array slice: arr[0][1..3]
-                codegen(node->children[0], file, asm_file, source_file_path); // Base (could be another array access)
+                codegen(node->children[0], file); // Base (could be another array access)
                 fprintf(file, "[");
-                codegen(node->children[1], file, asm_file, source_file_path); // Start index
+                codegen(node->children[1], file); // Start index
                 fprintf(file, "..");
-                codegen(node->children[2], file, asm_file, source_file_path); // End index
+                codegen(node->children[2], file); // End index
                 fprintf(file, "]");
                 // TODO: Implement nested slice if needed
                 // For now, treat as error or generate placeholder
@@ -2048,9 +1885,9 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             else
             {
                 // Nested access: arr[0][1]
-                codegen(node->children[0], file, asm_file, source_file_path); // Base (could be another array access)
+                codegen(node->children[0], file); // Base (could be another array access)
                 fprintf(file, "[");
-                codegen(node->children[1], file, asm_file, source_file_path); // Index
+                codegen(node->children[1], file); // Index
                 fprintf(file, "]");
             }
         }
@@ -2124,7 +1961,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             {
                 // .len on an array -> arrlen()
                 fprintf(file, "arrlen(");
-                codegen(obj, file, asm_file, source_file_path);
+                codegen(obj, file);
                 fprintf(file, ")");
             }
             else if (strcmp(prop_name, "push") == 0 || strcmp(prop_name, "pop") == 0)
@@ -2133,7 +1970,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 {
                     // push/pop without arguments - this shouldn't happen for push, but handle it
                     fprintf(file, "arrpop(");
-                    codegen(obj, file, asm_file, source_file_path);
+                    codegen(obj, file);
                     fprintf(file, ")");
                 }
                 // push is handled as method call, not here
@@ -2141,7 +1978,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             else
             {
                 // Regular property access
-                codegen(obj, file, asm_file, source_file_path);
+                codegen(obj, file);
 
                 // Determine if we should use -> or .
                 // The operator depends on whether the OBJECT is a pointer, not the field type
@@ -2149,17 +1986,38 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
 
                 // Case 1: 'self' or 'eu' is always a pointer
                 if (obj->type == NODE_VAR_REF && obj->name &&
-                    (strcmp(obj->name, "self") == 0 || strcmp(obj->name, "eu") == 0))
+                    (strcmp(obj->name, "eu") == 0))
                 {
                     is_pointer = true;
                 }
-                // Case 2: Array Access always returns a pointer for structs
-                // With Reference Semantics, arrays of structs are Pessoa**, and arr[i] returns Pessoa*
-                // Since primitives don't have properties, if we're accessing a property on array access,
-                // it must be a struct array, so always use ->
+                // Case 2: If obj is an array access, check if the array is of structs
+                // Arrays of structs return pointers, so use ->
                 else if (obj->type == NODE_ARRAY_ACCESS)
                 {
-                    is_pointer = true;
+                    // Array access: arr[i] or p->filhos[i]
+                    // Need to determine if the array is of structs
+                    if (obj->name)
+                    {
+                        // Simple array access: arr[i]
+                        char *array_type = scope_lookup(obj->name);
+                        if (array_type && array_type[0] == '[')
+                        {
+                            const char *base_type;
+                            count_array_depth(array_type, &base_type);
+                            if (is_struct_type(base_type))
+                            {
+                                is_pointer = true;
+                            }
+                        }
+                    }
+                    else if (arrlen(obj->children) > 0)
+                    {
+                        // Nested array access or property access: p->filhos[i]
+                        // The base could be a property access that returns an array of structs
+                        // For now, assume it's a pointer if we can't determine
+                        // This handles cases like p->filhos[i].nome
+                        is_pointer = true;
+                    }
                 }
                 // Case 3: If obj is a property access (nested), check if the previous access returned a pointer
                 // When we access a struct field that is a struct type, it returns a pointer
@@ -2184,34 +2042,16 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                         }
                         else
                         {
-                            // REFERENCE SEMANTICS: If base type is a struct, it's always a pointer
-                            // (This handles cases where the type wasn't stored with * suffix)
-                            if (is_struct_type(var_type))
+                            // REFERENCE SEMANTICS: If base type (without *) is a struct, it's always a pointer
+                            // Remove '*' if present to get base type
+                            char *base_type = var_type;
+                            if (len > 0 && var_type[len - 1] == '*')
+                            {
+                                base_type[len - 1] = '\0';
+                            }
+                            if (is_struct_type(base_type))
                             {
                                 is_pointer = true;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // Lookup failed - try to infer from property name
-                        // If the property we're accessing exists in any struct type,
-                        // it's likely the object is a struct pointer (REFERENCE SEMANTICS)
-                        const char *prop_name = node->data_type ? node->data_type : "";
-                        if (prop_name[0] != '\0')
-                        {
-                            // Check all registered struct types to see if any have this field
-                            // This is a heuristic - if we find a struct with this field, assume pointer
-                            for (int i = 0; i < shlen(type_registry); i++)
-                            {
-                                const char *struct_name = type_registry[i].key;
-                                FieldEntry *fields = type_registry[i].value;
-                                if (fields && shget(fields, prop_name) != NULL)
-                                {
-                                    // Found a struct with this field - assume it's a pointer
-                                    is_pointer = true;
-                                    break;
-                                }
                             }
                         }
                     }
@@ -2249,7 +2089,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, "), signed char: int8_to_string, short: int16_to_string, int: int32_to_string, long long: int64_to_string, long: int_arq_to_string, float: float32_to_string, double: float64_to_string, long double: float_ext_to_string, char*: char_to_string)(");
             if (node->name)
@@ -2258,7 +2098,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2272,7 +2112,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2285,7 +2125,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2298,7 +2138,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2311,7 +2151,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2324,7 +2164,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2338,7 +2178,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2351,7 +2191,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2364,7 +2204,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             }
             else if (arrlen(node->children) > 0)
             {
-                codegen(node->children[0], file, asm_file, source_file_path);
+                codegen(node->children[0], file);
             }
             fprintf(file, ")");
         }
@@ -2404,7 +2244,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 {
                     if (i > arg_start)
                         fprintf(file, ", ");
-                    codegen(node->children[i], file, asm_file, source_file_path);
+                    codegen(node->children[i], file);
                 }
                 fprintf(file, ")");
             }
@@ -2418,7 +2258,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, ")");
             }
@@ -2435,11 +2275,11 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF)
                 {
                     array_name = node->children[0]->name;
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 else if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, ", ");
                 // Push value: when node->name exists, base is stored in name, argument is in children[1]
@@ -2498,7 +2338,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                     }
                     else
                     {
-                        codegen(value_node, file, asm_file, source_file_path);
+                        codegen(value_node, file);
                     }
                 }
                 fprintf(file, ")");
@@ -2513,7 +2353,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
                 fprintf(file, ")");
             }
@@ -2541,37 +2381,20 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                         }
                     }
                 }
-                else if (arrlen(node->children) > 0)
+                else if (arrlen(node->children) > 0 && node->children[0]->type == NODE_VAR_REF)
                 {
-                    ASTNode *obj = node->children[0];
-                    
-                    // Array Access always returns a pointer for structs
-                    // With Reference Semantics, arrays of structs are Pessoa**, and arr[i] returns Pessoa*
-                    if (obj->type == NODE_ARRAY_ACCESS)
+                    char *obj_type = scope_lookup(node->children[0]->name);
+                    if (obj_type)
                     {
-                        obj_is_pointer = true;
-                    }
-                    // Property access on structs returns pointers
-                    else if (obj->type == NODE_PROP_ACCESS)
-                    {
-                        obj_is_pointer = true;
-                    }
-                    // Variable reference - check symbol table
-                    else if (obj->type == NODE_VAR_REF)
-                    {
-                        char *obj_type = scope_lookup(obj->name);
-                        if (obj_type)
+                        size_t len = strlen(obj_type);
+                        if (len > 0 && obj_type[len - 1] == '*')
                         {
-                            size_t len = strlen(obj_type);
-                            if (len > 0 && obj_type[len - 1] == '*')
-                            {
-                                obj_is_pointer = true;
-                            }
-                            else if (is_struct_type(obj_type))
-                            {
-                                // REFERENCE SEMANTICS: Structs are always pointers
-                                obj_is_pointer = true;
-                            }
+                            obj_is_pointer = true;
+                        }
+                        else if (is_struct_type(obj_type))
+                        {
+                            // REFERENCE SEMANTICS: Structs are always pointers
+                            obj_is_pointer = true;
                         }
                     }
                 }
@@ -2587,7 +2410,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 }
                 else if (arrlen(node->children) > 0)
                 {
-                    codegen(node->children[0], file, asm_file, source_file_path);
+                    codegen(node->children[0], file);
                 }
 
                 // Print other arguments
@@ -2596,7 +2419,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 for (int i = arg_start_idx; i < arrlen(node->children); i++)
                 {
                     fprintf(file, ", ");
-                    codegen(node->children[i], file, asm_file, source_file_path);
+                    codegen(node->children[i], file);
                 }
                 fprintf(file, ")");
             }
@@ -2609,7 +2432,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
         fprintf(file, "    if (!(");
         if (arrlen(node->children) > 0)
         {
-            codegen(node->children[0], file, asm_file, source_file_path); // Condition
+            codegen(node->children[0], file); // Condition
         }
         fprintf(file, ")) {\n");
         fprintf(file, "        fprintf(stderr, \"[PANICO] %%s (Linha %%d)\\n\", ");
@@ -2698,12 +2521,12 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
                 if (child->type == NODE_METHOD_CALL)
                 {
                     fprintf(file, "    ");
-                    codegen(child, file, asm_file, source_file_path);
+                    codegen(child, file);
                     fprintf(file, ";\n");
                 }
                 else
                 {
-                    codegen(child, file, asm_file, source_file_path);
+                    codegen(child, file);
                 }
             }
         }
@@ -2721,7 +2544,7 @@ void codegen(ASTNode *node, FILE *file, FILE *asm_file, const char* source_file_
             // If so, we need to handle the type mismatch
             // For now, just generate the return value - the compiler will error if types don't match
             // The real fix is to update function signatures, but that requires two-pass codegen
-            codegen(ret_value, file, asm_file, source_file_path);
+            codegen(ret_value, file);
         }
         fprintf(file, ";\n");
         break;

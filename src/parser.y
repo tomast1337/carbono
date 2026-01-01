@@ -31,10 +31,10 @@ ASTNode* root_node = NULL;
 %token <float_val> TOKEN_LIT_FLOAT
 %token TOKEN_PROGRAMA TOKEN_BIBLIOTECA TOKEN_VAR TOKEN_SE TOKEN_SENAO TOKEN_EXTERNO TOKEN_FUNCAO TOKEN_SEMICOLON
 %token TOKEN_ENQUANTO TOKEN_CADA TOKEN_INFINITO TOKEN_PARAR TOKEN_CONTINUAR TOKEN_DOTDOT TOKEN_LER
-%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW TOKEN_TRUE TOKEN_FALSE TOKEN_EMBED
+%token TOKEN_ESTRUTURA TOKEN_ASSERT TOKEN_RETORNE TOKEN_NULL TOKEN_NEW TOKEN_TRUE TOKEN_FALSE
 
 %left '+' '-'
-%left '*' '/' '%'
+%left '*' '/'
 %nonassoc '>' '<'
 %right '.'
 %nonassoc PROP_ACCESS
@@ -435,12 +435,6 @@ term:
         ast_add_child($$, $1); // Left operand
         ast_add_child($$, $3); // Right operand
     }
-    | term '%' factor {
-        $$ = ast_new(NODE_BINARY_OP);
-        $$->data_type = sdsnew("%");
-        ast_add_child($$, $1); // Left operand
-        ast_add_child($$, $3); // Right operand
-    }
     | factor {
         $$ = $1;
     }
@@ -534,11 +528,6 @@ factor:
         /* Heap allocation: nova Node */
         $$ = ast_new(NODE_NEW);
         $$->data_type = sdsnew($2);
-    }
-    | TOKEN_EMBED TOKEN_LIT_STRING {
-        /* Embed file: incorporar "file.png" */
-        $$ = ast_new(NODE_EMBED);
-        $$->string_value = sdsnew($2); // The filename
     }
     | TOKEN_ID '(' arg_list ')' {
         /* Function call as expression: formatar_texto("...") or merge(left, right) */

@@ -24,6 +24,9 @@
         "include": "#numbers"
       },
       {
+        "include": "#operators"
+      },
+      {
         "include": "#functions"
       }
     ],
@@ -51,11 +54,15 @@
           },
           {
             "name": "keyword.other.basalto",
-            "match": "\\b(programa|funcao|estrutura|externo|var|alias)\\b"
+            "match": "\\b(programa|biblioteca|funcao|estrutura|externo|var)\\b"
           },
           {
             "name": "keyword.operator.new.basalto",
-            "match": "\\b(ler|escreval)\\b"
+            "match": "\\b(ler|escreval|nova|incorporar)\\b"
+          },
+          {
+            "name": "constant.language.null.basalto",
+            "match": "\\b(nulo)\\b"
           }
         ]
       },
@@ -63,7 +70,7 @@
         "patterns": [
           {
             "name": "storage.type.basalto",
-            "match": "\\b(inteiro|inteiro32|inteiro64|real|real32|real64|texto|booleano|vazio)\\b"
+            "match": "\\b(inteiro32|inteiro64|inteiro16|inteiro8|inteiro_arq|natural32|natural64|natural16|natural_arq|tamanho|byte|real32|real64|real_ext|booleano|texto|caractere|ponteiro|vazio|i32|i64|i16|i8|n32|n64|n16|bool|r32|r64|r_ext)\\b"
           },
           {
             "name": "constant.language.basalto",
@@ -109,7 +116,15 @@
       },
       "numbers": {
           "name": "constant.numeric.basalto",
-          "match": "\\b\\d+(\\.\\d+)?(r|f)?\\b"
+          "match": "\\b\\d+(?:_\\d+)*(\\.\\d+(?:_\\d+)*)?(r|f)?\\b"
+      },
+      "operators": {
+        "patterns": [
+          {
+            "name": "keyword.operator.range.basalto",
+            "match": "\\.\\."
+          }
+        ]
       }
     },
     "scopeName": "source.basalto"
