@@ -114,5 +114,7 @@ int main(int argc, char **argv)
     if (!nob_cmd_run_sync(cmd))
         return 1;
 
+    printf("Successfully built basalto\n");
+    printf("You can now run it with: ./build/basalto\n");
     return 0;
 }
